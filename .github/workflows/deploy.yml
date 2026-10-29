@@ -16,6 +16,16 @@ jobs:
         with:
           fetch-depth: 2
 
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          tools: composer:v2
+          coverage: none
+
+      - name: Install PHP dependencies
+        run: composer install --no-dev --optimize-autoloader --no-interaction --prefer-dist
+
       - name: Setup SSH
         run: |
           mkdir -p ~/.ssh
@@ -32,7 +42,6 @@ jobs:
             --exclude='/.git/' \
             --exclude='/.github/' \
             --exclude='/.env' \
-            --exclude='/vendor/' \
             --exclude='/frontend/' \
             --exclude='/writable/logs/' \
             --exclude='/writable/cache/' \
@@ -45,3 +54,9 @@ jobs:
             --exclude='/nbproject/' \
             --exclude='/.idea/' \
             ./ ${{ secrets.SSH_USERNAME }}@${{ secrets.SSH_HOST }}:${{ secrets.SSH_TARGET_DIR }}
+
+      - name: Prepare writable directories
+        run: |
+          ssh -p "${{ secrets.SSH_PORT }}" -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes \
+            "${{ secrets.SSH_USERNAME }}@${{ secrets.SSH_HOST }}" \
+            "mkdir -p '${{ secrets.SSH_TARGET_DIR }}/writable/logs' '${{ secrets.SSH_TARGET_DIR }}/writable/cache' '${{ secrets.SSH_TARGET_DIR }}/writable/session' '${{ secrets.SSH_TARGET_DIR }}/writable/uploads' '${{ secrets.SSH_TARGET_DIR }}/writable/debugbar' && chmod -R 775 '${{ secrets.SSH_TARGET_DIR }}/writable'"
