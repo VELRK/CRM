@@ -371,8 +371,27 @@ class DeskApi extends BaseController
 
         return $this->run(function () use ($id) {
             $input = $this->input();
+            $before = $this->sites->plot($this->tenant(), $id);
+
+            if ($before === null) {
+                return $this->fail('That plot is not in this workspace.', 404);
+            }
+
             $input['by_user_id'] = $this->user();
+            $status = (string) ($input['status'] ?? $before['status']);
+            $db = db_connect();
+            $db->transException(true)->transStart();
             $this->sites->saveBooking($this->tenant(), $id, $input);
+
+            if (! in_array((string) $before['status'], SiteService::SALE_STATUSES, true) && in_array($status, SiteService::SALE_STATUSES, true)) {
+                $input['credited_user_id'] = (int) ($input['associateUserId'] ?? $input['associate_user_id'] ?? 0);
+                $input['head_user_id'] = (int) ($input['headUserId'] ?? $input['head_user_id'] ?? 0);
+                $input['lead_id'] = (int) ($input['leadId'] ?? $input['lead_id'] ?? 0);
+                $input['sale_value'] = (string) ($input['bookingAmount'] ?? $input['booking_amount'] ?? '');
+                $this->estate->recordSale($this->tenant(), $this->user(), $id, $status, $input);
+            }
+
+            $db->transComplete();
             $rows = array_values(array_filter($this->sites->plots($this->tenant()), static fn (array $row): bool => (int) $row['id'] === $id));
 
             return $this->ok($rows[0] ?? ['id' => $id]);
@@ -1111,20 +1130,22 @@ class DeskApi extends BaseController
             $input = $this->input();
             $email = strtolower(trim((string) ($input['email'] ?? '')));
             $existing = $this->workspaces->userByEmail($email);
-            $generated = false;
 
             if ($existing === null && strlen((string) ($input['password'] ?? '')) < 8) {
                 $input['password'] = $this->roles->temporaryPassword();
-                $generated = true;
             }
 
             $id = $this->roles->createMember($this->tenant(), $this->plan(), $input, (bool) $this->actor()['is_owner'], $this->user());
             $token = $this->roles->issuePasswordToken($id);
+            $password = $existing === null ? (string) $input['password'] : '';
 
             return $this->ok([
                 'id'                 => $id,
-                'temporary_password' => $generated ? (string) $input['password'] : '',
+                'email'              => $email,
+                'password'           => $password,
+                'temporary_password' => $password,
                 'setup_path'         => '/desk/?setup=' . $token,
+                'login'              => 'POST /api/v1/auth/login with this email and password. No other restriction.',
             ]);
         });
     }

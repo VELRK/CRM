@@ -386,12 +386,30 @@ class EstateService
         }
 
         $plot = $this->db->table('plots')->where('tenant_id', $tenantId)->where('id', $plotId)->where('deleted_at', null)->get()->getRowArray();
-        $leadId = (int) ($input['lead_id'] ?? 0);
-        $staffId = (int) ($input['credited_user_id'] ?? 0);
-        $lead = $leadId > 0 ? $this->db->table('leads')->where('tenant_id', $tenantId)->where('id', $leadId)->where('deleted_at', null)->get()->getRowArray() : null;
+        $leadId = (int) ($input['lead_id'] ?? $input['leadId'] ?? 0);
+        $staffId = (int) ($input['credited_user_id'] ?? $input['associateUserId'] ?? $input['associate_user_id'] ?? 0);
 
-        if ($plot === null || $lead === null || $staffId < 1) {
-            throw new RuntimeException('Booked, sold or registered plots need the credited staff member and the lead.');
+        if ($plot === null) {
+            throw new RuntimeException('That plot is not in this workspace.');
+        }
+
+        if ($leadId < 1) {
+            $phone = preg_replace('/\D+/', '', (string) ($input['customerPhone'] ?? $input['customer_phone'] ?? $plot['customer_phone'] ?? '')) ?? '';
+            if ($phone !== '') {
+                $matched = $this->db->table('leads')->select('id')->where('tenant_id', $tenantId)->where('deleted_at', null)->groupStart()->where('phone_number', $phone)->orWhere('phone', $phone)->groupEnd()->get()->getRowArray();
+                $leadId = (int) ($matched['id'] ?? 0);
+            }
+        }
+
+        $lead = $leadId > 0 ? $this->db->table('leads')->where('tenant_id', $tenantId)->where('id', $leadId)->where('deleted_at', null)->get()->getRowArray() : null;
+        $already = $this->db->table('sales')->where('tenant_id', $tenantId)->where('plot_id', $plotId)->where('deleted_at', null)->where('status', 'active')->countAllResults();
+
+        if ($already > 0) {
+            return;
+        }
+
+        if ($lead === null || $staffId < 1) {
+            throw new RuntimeException('A booked, sold, or registered plot needs the associate and the lead. The incentive is added at that moment.');
         }
 
         $value = trim((string) ($input['sale_value'] ?? ''));
@@ -413,7 +431,7 @@ class EstateService
             'team_id'          => $teamId > 0 ? $teamId : null,
             'sale_value_minor' => $minor,
             'sale_on'          => date('Y-m-d'),
-            'source'           => $lead['source'] ?? null,
+            'source'           => $lead['lead_source'] ?? $lead['source'] ?? null,
             'plot_status'      => $status,
             'split_user_id'    => $splitId > 0 ? $splitId : null,
             'split_minor'      => $splitMinor,

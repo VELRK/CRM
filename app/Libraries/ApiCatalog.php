@@ -120,8 +120,8 @@ class ApiCatalog
             self::entry('Lists', 'FR-3.2', 'Lookup lists', 'GET', '/api/v1/lookups?kind=lead_status', true, 'workspace.settings', null, ['ok' => true, 'data' => [['code' => 'new', 'label' => 'New', 'active' => 1]]]),
 
             self::entry('Staff', 'FR-1.1', 'Create user', 'POST', '/api/v1/users', true, 'team.invite', [
-                'name' => 'Anitha Joseph', 'email' => 'anitha@example.com', 'phoneNumber' => '9840011111', 'role_id' => 8, 'profile' => 'Advisor', 'groupId' => 1, 'dob' => '1994-04-12', 'street' => '12 East Street', 'city' => 'Coimbatore', 'state' => 'Tamil Nadu', 'zipCode' => '641001', 'active' => 1,
-            ], ['ok' => true, 'data' => ['id' => 4, 'temporary_password' => 'TempPass12', 'setup_path' => '/desk/?setup=token-once']]),
+                'name' => 'Anitha Joseph', 'email' => 'anitha@example.com', 'password' => 'password1', 'phoneNumber' => '9840011111', 'role_id' => 8, 'profile' => 'Advisor', 'groupId' => 1, 'dob' => '1994-04-12', 'street' => '12 East Street', 'city' => 'Coimbatore', 'state' => 'Tamil Nadu', 'zipCode' => '641001', 'active' => 1,
+            ], ['ok' => true, 'data' => ['id' => 4, 'email' => 'anitha@example.com', 'password' => 'password1', 'temporary_password' => 'password1', 'setup_path' => '/desk/?setup=token-once', 'login' => 'POST /api/v1/auth/login with this email and password. Any role is allowed.']]),
             self::entry('Teams', 'FR-1.2', 'Delete team', 'POST', '/api/v1/teams/1/delete', true, 'teams.manage', new \stdClass(), ['ok' => true, 'data' => ['id' => 1, 'deleted' => true]]),
             self::entry('Projects', 'FR-2.1', 'Delete project', 'POST', '/api/v1/projects/1/delete', true, 'projects.delete', new \stdClass(), ['ok' => true, 'data' => ['id' => 1, 'deleted' => true]]),
             self::entry('Plots', 'FR-3.6', 'Save booking', 'POST', '/api/v1/plots/1/booking', true, 'plots.update', [

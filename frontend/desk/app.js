@@ -117,7 +117,7 @@ function Login({ onIn }) {
         try {
             const data = await call('/api/v1/auth/login', { method: 'POST', body: { email, password, device: 'React desk' } });
             localStorage.setItem(tokenKey, data.token);
-            onIn(data.user);
+            onIn(await call('/api/v1/me'));
         } catch (e) {
             setError(e.message);
         }
@@ -586,8 +586,8 @@ function UserForm({ onDone, onClose }) {
         const link = location.origin + apiPath(issued.setup_path || '');
         return html`<div class="modal-back" onClick=${onDone}><form class="form-card modal-card confirm-card" onClick=${(event) => event.stopPropagation()} onSubmit=${(event) => { event.preventDefault(); onDone(); }}>
             <h2>User created</h2>
-            <p class="lede">Share the temporary password and this link. They open the link to create or change the password. The link works once and lasts 7 days.</p>
-            ${issued.temporary_password ? field('Temporary password', html`<input readOnly value=${issued.temporary_password} />`) : html`<p>This email already has an account. Send the link so they can set a new password.</p>`}
+            <p class="lede">Any role can be created. Sign in with POST /api/v1/auth/login using this email and password. There is no extra restriction.</p>
+            ${issued.password || issued.temporary_password ? field('Password', html`<input readOnly value=${issued.password || issued.temporary_password} />`) : html`<p>This email already has an account. Sign in with the password that account already uses.</p>`}
             ${field('Setup link', html`<input readOnly value=${link} />`, true)}
             <div class="row-actions"><button class="primary" type="submit">Done</button></div>
         </form></div>`;
@@ -596,7 +596,8 @@ function UserForm({ onDone, onClose }) {
         ${field('Name', inputOf(form, 'name', setForm))}
         ${field('Email', inputOf(form, 'email', setForm, 'email'))}
         ${field('Phone', inputOf(form, 'phoneNumber', setForm, 'tel'))}
-        ${field('Role', selectOf(form, 'role_id', setForm, [['', 'Choose a role'], ...roles.filter((row) => !Number(row.is_owner)).map((row) => [String(row.id), row.name])]))}
+        ${field('Password', inputOf(form, 'password', setForm, 'password'))}
+        ${field('Role', selectOf(form, 'role_id', setForm, [['', 'Choose a role'], ...roles.map((row) => [String(row.id), row.name])]))}
         ${field('Profile', inputOf(form, 'profile', setForm))}
         ${field('Team', selectOf(form, 'groupId', setForm, [['', 'None'], ...teams.map((row) => [String(row.id), row.name])]))}
         ${field('Date of birth', inputOf(form, 'dob', setForm, 'date'))}
@@ -1406,10 +1407,12 @@ function regCell(row) {
     return '—';
 }
 function BookingForm({ plot, people, onDone, onClose }) {
+    const [leads, setLeads] = useState([]);
     const [form, setForm] = useState({
         status: plot.status || 'booked',
         customerName: plot.customer_name || '',
         customerPhone: plot.customer_phone || '',
+        leadId: '',
         associateUserId: plot.associate_user_id ? String(plot.associate_user_id) : '',
         bookingOn: String(plot.booking_on || '').slice(0, 10),
         advance: plot.advance_minor ? String(Math.round(Number(plot.advance_minor) / 100)) : '',
@@ -1420,12 +1423,16 @@ function BookingForm({ plot, people, onDone, onClose }) {
         remarks: plot.remarks || '',
     });
     const [error, setError] = useState('');
+    useEffect(() => { call('/api/v1/leads').then((rows) => setLeads(Array.isArray(rows) ? rows : [])).catch(() => {}); }, []);
     const set = (key) => (event) => setForm({ ...form, [key]: event.target.value });
+    const sale = form.status === 'booked' || form.status === 'sold' || form.status === 'registered';
     async function submit(event) {
         event.preventDefault();
         setError('');
+        if (sale && !form.associateUserId) { setError('Choose the associate. The incentive is added for that person.'); return; }
+        if (sale && !form.leadId) { setError('Choose the lead. The incentive is added when the plot is booked, sold, or registered.'); return; }
         try {
-            await call('/api/v1/plots/' + plot.id + '/booking', { method: 'POST', body: form });
+            await call('/api/v1/plots/' + plot.id + '/booking', { method: 'POST', body: { ...form, leadId: Number(form.leadId || 0), associateUserId: Number(form.associateUserId || 0) } });
             onDone();
         } catch (e) { setError(e.message); }
     }
@@ -1433,7 +1440,8 @@ function BookingForm({ plot, people, onDone, onClose }) {
         ${xrow('Status', html`<select value=${form.status} onChange=${set('status')}>${Object.entries(PLOT_LABEL).map(([value, label]) => html`<option key=${value} value=${value}>${label}</option>`)}</select>`, true)}
         ${xrow('Customer', html`<input value=${form.customerName} onInput=${set('customerName')} />`, true)}
         ${xrow('Contact', html`<input value=${form.customerPhone} onInput=${set('customerPhone')} />`)}
-        ${xrow('Associate', html`<select value=${form.associateUserId} onChange=${set('associateUserId')}><option value="">Choose</option>${people.map((row) => html`<option key=${row.user_id || row.id} value=${String(row.user_id || row.id)}>${row.name}</option>`)}</select>`)}
+        ${xrow('Lead', html`<select value=${form.leadId} onChange=${set('leadId')}><option value="">Choose</option>${leads.map((row) => html`<option key=${row.id} value=${String(row.id)}>${row.lead_name || row.name || row.phone_number}</option>`)}</select>`, sale)}
+        ${xrow('Associate', html`<select value=${form.associateUserId} onChange=${set('associateUserId')}><option value="">Choose</option>${people.map((row) => html`<option key=${row.user_id || row.id} value=${String(row.user_id || row.id)}>${row.name}</option>`)}</select>`, sale)}
         ${xrow('Booking date', html`<input type="date" value=${form.bookingOn} onInput=${set('bookingOn')} />`)}
         ${xrow('Advance', html`<input type="number" min="0" value=${form.advance} onInput=${set('advance')} />`)}
         ${xrow('Advance received', html`<input type="date" value=${form.advanceReceivedOn} onInput=${set('advanceReceivedOn')} />`)}
@@ -2447,7 +2455,8 @@ function AttendanceBoard({ user }) {
     const [people, setPeople] = useState([]);
     const [error, setError] = useState('');
     const [marking, setMarking] = useState(null);
-    const permissions = user.permissions || [];
+    const [permissions, setPermissions] = useState(user.permissions || []);
+    useEffect(() => { call('/api/v1/me').then((me) => setPermissions(me.permissions || [])).catch(() => {}); }, []);
     const canCorrect = permissions.includes('attendance.correct');
     const canMark = permissions.includes('attendance.mark') || canCorrect;
     const today = dayKey(now);
@@ -2479,8 +2488,8 @@ function AttendanceBoard({ user }) {
     const years = [now.getFullYear() - 1, now.getFullYear(), now.getFullYear() + 1];
     const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
     function openMark(person, date) {
-        if (!canCorrect && String(person.user_id) !== String(user.id)) return;
-        if (!canMark) return;
+        if (!canMark) { setError('This sign-in cannot mark attendance.'); return; }
+        if (!canCorrect && String(person.user_id) !== String(user.id)) { setError('You can mark only your own attendance.'); return; }
         const existing = (byPerson[String(person.user_id)] || {})[date] || (date === today ? todayMap[String(person.user_id)] : null);
         setMarking({ person, date, status: existing?.status || 'present', action: existing?.check_in && !existing?.check_out ? 'out' : 'in', note: existing?.note || '' });
     }
@@ -2490,6 +2499,7 @@ function AttendanceBoard({ user }) {
             <label>Year<select value=${String(year)} onChange=${(event) => setYear(Number(event.target.value))}>${years.map((value) => html`<option key=${value} value=${String(value)}>${value}</option>`)}</select></label>
             <label>Month<select value=${String(month)} onChange=${(event) => setMonth(Number(event.target.value))}>${months.map((label, index) => html`<option key=${label} value=${String(index + 1)}>${label}</option>`)}</select></label>
             <button class="ghost" type="button" onClick=${() => { setYear(now.getFullYear()); setMonth(now.getMonth() + 1); }}>Today</button>
+            ${canMark ? html`<button class="primary" type="button" onClick=${() => { const person = staff.find((row) => String(row.user_id) === String(user.id)) || (canCorrect ? staff[0] : null); if (person) openMark(person, today); else setError('No staff row is available to mark.'); }}>Mark attendance</button>` : null}
         </div>
         <div class="attend-layout">
             <section class="panel-card">

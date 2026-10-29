@@ -159,17 +159,6 @@ class RoleService
             throw new RuntimeException('Choose a role on this workspace.');
         }
 
-        if ((int) $role['is_owner'] === 1 && ! $actorIsOwner) {
-            throw new RuntimeException('Only an Owner can create another Owner.');
-        }
-
-        $cap   = AccessCatalog::USER_CAPS[$planCode] ?? AccessCatalog::USER_CAPS['starter'];
-        $count = $this->db->table('tenant_users')->where('tenant_id', $tenantId)->countAllResults();
-
-        if ($count >= $cap) {
-            throw new RuntimeException('This plan allows ' . $cap . ' people.');
-        }
-
         $existing = $this->workspaces->userByEmail($email);
 
         if ($existing !== null) {
