@@ -4,6 +4,11 @@ import htm from 'https://esm.sh/htm@3.1.1';
 
 const html = htm.bind(React.createElement);
 const tokenKey = 'atrium-token';
+const appRoot = new URL('..', import.meta.url).pathname.replace(/\/$/, '');
+
+function apiPath(path) {
+    return typeof path === 'string' && path.startsWith('/') ? appRoot + path : path;
+}
 
 const nav = [
     ['Menu', [['CRM', 'home'], ['Reports', 'reports']]],
@@ -40,7 +45,7 @@ async function call(path, options = {}) {
     if (options.body !== undefined) {
         headers['Content-Type'] = 'application/json';
     }
-    const response = await fetch(path, {
+    const response = await fetch(apiPath(path), {
         method: options.method || 'GET',
         headers,
         body: options.body === undefined ? undefined : JSON.stringify(options.body),
@@ -578,7 +583,7 @@ function UserForm({ onDone, onClose }) {
         } catch (e) { setError(e.message); }
     }
     if (issued) {
-        const link = location.origin + (issued.setup_path || '');
+        const link = location.origin + apiPath(issued.setup_path || '');
         return html`<div class="modal-back" onClick=${onDone}><form class="form-card modal-card confirm-card" onClick=${(event) => event.stopPropagation()} onSubmit=${(event) => { event.preventDefault(); onDone(); }}>
             <h2>User created</h2>
             <p class="lede">Share the temporary password and this link. They open the link to create or change the password. The link works once and lasts 7 days.</p>
@@ -2355,7 +2360,7 @@ function Console() {
             const token = localStorage.getItem(tokenKey);
             if (token && current.auth !== false) headers.Authorization = 'Bearer ' + token;
             if (parsed !== undefined) headers['Content-Type'] = 'application/json';
-            const response = await fetch(path || current.path, { method: current.method, headers, body: parsed === undefined ? undefined : JSON.stringify(parsed) });
+            const response = await fetch(apiPath(path || current.path), { method: current.method, headers, body: parsed === undefined ? undefined : JSON.stringify(parsed) });
             const text = await response.text();
             let pretty = text;
             try { pretty = JSON.stringify(JSON.parse(text), null, 2); } catch { /* file or plain text */ }
@@ -2646,7 +2651,7 @@ function App() {
         }
         call('/api/v1/me').then(setUser).catch(() => localStorage.removeItem(tokenKey)).finally(() => setReady(true));
     }, []);
-    if (setup) return html`<${SetPassword} token=${setup} onDone=${() => { history.replaceState({}, '', '/desk/'); setSetup(''); }} />`;
+    if (setup) return html`<${SetPassword} token=${setup} onDone=${() => { history.replaceState({}, '', apiPath('/desk/')); setSetup(''); }} />`;
     if (!ready) return html`<main class="login"><p>Opening Atrium…</p></main>`;
     if (!user) return html`<${Login} onIn=${setUser} />`;
     const spec = lists[screen];

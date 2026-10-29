@@ -24,11 +24,7 @@ class AuthController extends BaseController
 
     public function home()
     {
-        if (session()->get('user_id')) {
-            return redirect()->to('/app');
-        }
-
-        return redirect()->to('/login');
+        return redirect()->to('/desk/');
     }
 
     public function loginForm()
