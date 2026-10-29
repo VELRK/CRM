@@ -1,0 +1,1184 @@
+<?php
+
+namespace App\Libraries;
+
+use CodeIgniter\Database\BaseConnection;
+use RuntimeException;
+
+class EstateService
+{
+    public function __construct(private BaseConnection $db)
+    {
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    public function options(int $tenantId, string $kind): array
+    {
+        if (! $this->db->tableExists('lookup_items')) {
+            return [];
+        }
+
+        return $this->db->table('lookup_items')
+            ->where('tenant_id', $tenantId)
+            ->where('kind', $kind)
+            ->where('deleted_at', null)
+            ->where('active', 1)
+            ->orderBy('sort_order', 'ASC')
+            ->get()
+            ->getResultArray();
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    public function allOptions(int $tenantId): array
+    {
+        if (! $this->db->tableExists('lookup_items')) {
+            return [];
+        }
+
+        return $this->db->table('lookup_items')
+            ->where('tenant_id', $tenantId)
+            ->where('deleted_at', null)
+            ->orderBy('kind', 'ASC')
+            ->orderBy('sort_order', 'ASC')
+            ->get()
+            ->getResultArray();
+    }
+
+    /**
+     * @param array<string, mixed> $input
+     */
+    public function saveOption(int $tenantId, ?int $id, array $input): void
+    {
+        $kind  = (string) ($input['kind'] ?? '');
+        $code  = strtolower(trim((string) ($input['code'] ?? '')));
+        $label = trim((string) ($input['label'] ?? ''));
+
+        if (! in_array($kind, ['lead_status', 'plot_status', 'lead_source', 'designation'], true) || $code === '' || $label === '') {
+            throw new RuntimeException('A list item needs a type, code and label.');
+        }
+
+        if (! preg_match('/^[a-z0-9_-]{2,40}$/', $code)) {
+            throw new RuntimeException('Use a short code such as walk-in or site_visit.');
+        }
+
+        $now = date('Y-m-d H:i:s');
+        $data = [
+            'kind'       => $kind,
+            'code'       => $code,
+            'label'      => $label,
+            'sort_order' => max(0, (int) ($input['sort_order'] ?? 0)),
+            'active'     => empty($input['active']) ? 0 : 1,
+        ];
+
+        if ($id === null) {
+            $trashed = $this->db->table('lookup_items')
+                ->where('tenant_id', $tenantId)
+                ->where('kind', $kind)
+                ->where('code', $code)
+                ->where('deleted_at IS NOT NULL', null, false)
+                ->get()
+                ->getRowArray();
+
+            if ($trashed !== null) {
+                $data['deleted_at'] = null;
+                $this->db->table('lookup_items')->where('id', (int) $trashed['id'])->update($data);
+
+                return;
+            }
+
+            $data['tenant_id'] = $tenantId;
+            $this->db->table('lookup_items')->insert($data);
+
+            return;
+        }
+
+        $row = $this->db->table('lookup_items')->where('tenant_id', $tenantId)->where('id', $id)->where('deleted_at', null)->get()->getRowArray();
+
+        if ($row === null) {
+            throw new RuntimeException('That list item is not in this workspace.');
+        }
+
+        $this->db->table('lookup_items')->where('id', $id)->update($data);
+
+        if ($kind === 'designation' && (string) $row['code'] !== $code) {
+            $this->db->table('staff_profiles')
+                ->where('tenant_id', $tenantId)
+                ->where('designation', $row['code'])
+                ->update(['designation' => $code, 'updated_at' => $now]);
+        }
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    public function designations(int $tenantId): array
+    {
+        if (! $this->db->tableExists('lookup_items')) {
+            return [];
+        }
+
+        return $this->db->table('lookup_items')
+            ->where('tenant_id', $tenantId)
+            ->where('kind', 'designation')
+            ->where('deleted_at', null)
+            ->orderBy('sort_order', 'ASC')
+            ->orderBy('label', 'ASC')
+            ->get()
+            ->getResultArray();
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    public function designationLabels(int $tenantId): array
+    {
+        $labels = [];
+
+        if (! $this->db->tableExists('lookup_items')) {
+            return $labels;
+        }
+
+        $rows = $this->db->table('lookup_items')
+            ->select('code, label')
+            ->where('tenant_id', $tenantId)
+            ->where('kind', 'designation')
+            ->orderBy('id', 'ASC')
+            ->get()
+            ->getResultArray();
+
+        foreach ($rows as $row) {
+            $labels[(string) $row['code']] = (string) $row['label'];
+        }
+
+        return $labels;
+    }
+
+    public function deleteDesignation(int $tenantId, int $id): void
+    {
+        $row = $this->db->table('lookup_items')
+            ->where('tenant_id', $tenantId)
+            ->where('id', $id)
+            ->where('kind', 'designation')
+            ->where('deleted_at', null)
+            ->get()
+            ->getRowArray();
+
+        if ($row === null) {
+            throw new RuntimeException('That designation is not in this workspace.');
+        }
+
+        $this->db->table('lookup_items')->where('id', $id)->update(['deleted_at' => date('Y-m-d H:i:s')]);
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    public function teams(int $tenantId): array
+    {
+        if (! $this->db->tableExists('teams')) {
+            return [];
+        }
+
+        return $this->db->table('teams t')
+            ->select('t.*, u.name AS head_name')
+            ->join('users u', 'u.id = t.head_user_id', 'left')
+            ->where('t.tenant_id', $tenantId)
+            ->where('t.deleted_at', null)
+            ->orderBy('t.name', 'ASC')
+            ->get()
+            ->getResultArray();
+    }
+
+    /**
+     * @param array<string, mixed> $input
+     */
+    public function saveTeam(int $tenantId, ?int $id, array $input): int
+    {
+        $name = trim((string) ($input['name'] ?? ''));
+
+        if ($name === '') {
+            throw new RuntimeException('A team needs a name.');
+        }
+
+        $head = (int) ($input['head_user_id'] ?? 0);
+        $now  = date('Y-m-d H:i:s');
+        $data = [
+            'name'         => $name,
+            'head_user_id' => $head > 0 ? $head : null,
+            'updated_at'   => $now,
+        ];
+
+        if ($id === null) {
+            $data['tenant_id']  = $tenantId;
+            $data['created_at'] = $now;
+            $this->db->table('teams')->insert($data);
+            $id = (int) $this->db->insertID();
+        } else {
+            $this->db->table('teams')->where('tenant_id', $tenantId)->where('id', $id)->update($data);
+        }
+
+        $memberIds = $input['member_ids'] ?? [];
+        $memberIds = is_array($memberIds) ? array_map('intval', $memberIds) : [];
+
+        if ($head > 0) {
+            $memberIds[] = $head;
+        }
+
+        $this->syncMembers($tenantId, $id, array_values(array_unique(array_filter($memberIds))));
+
+        return $id;
+    }
+
+    public function deleteTeam(int $tenantId, int $id): void
+    {
+        $team = $this->db->table('teams')->where('tenant_id', $tenantId)->where('id', $id)->where('deleted_at', null)->get()->getRowArray();
+
+        if ($team === null) {
+            throw new RuntimeException('That team is not in this workspace.');
+        }
+
+        $this->db->table('teams')->where('id', $id)->update([
+            'deleted_at' => date('Y-m-d H:i:s'),
+            'updated_at' => date('Y-m-d H:i:s'),
+        ]);
+    }
+
+    /**
+     * @param list<int> $userIds
+     */
+    private function syncMembers(int $tenantId, int $teamId, array $userIds): void
+    {
+        $today = date('Y-m-d');
+        $open  = $this->db->table('team_memberships')
+            ->where('tenant_id', $tenantId)
+            ->where('team_id', $teamId)
+            ->where('to_on', null)
+            ->get()
+            ->getResultArray();
+        $openIds = array_map(static fn (array $row): int => (int) $row['user_id'], $open);
+
+        foreach ($open as $row) {
+            if (! in_array((int) $row['user_id'], $userIds, true)) {
+                $this->db->table('team_memberships')->where('id', (int) $row['id'])->update(['to_on' => $today]);
+                $this->db->table('staff_profiles')->where('tenant_id', $tenantId)->where('user_id', (int) $row['user_id'])->where('team_id', $teamId)->update(['team_id' => null]);
+            }
+        }
+
+        foreach ($userIds as $userId) {
+            if (in_array($userId, $openIds, true)) {
+                continue;
+            }
+
+            $this->db->table('team_memberships')
+                ->where('tenant_id', $tenantId)
+                ->where('user_id', $userId)
+                ->where('to_on', null)
+                ->update(['to_on' => $today]);
+            $this->db->table('team_memberships')->insert([
+                'tenant_id'  => $tenantId,
+                'team_id'    => $teamId,
+                'user_id'    => $userId,
+                'from_on'    => $today,
+                'created_at' => date('Y-m-d H:i:s'),
+            ]);
+            $this->db->table('staff_profiles')->where('tenant_id', $tenantId)->where('user_id', $userId)->update(['team_id' => $teamId]);
+        }
+    }
+
+    /**
+     * @return list<int>
+     */
+    public function memberIds(int $tenantId, int $teamId): array
+    {
+        $rows = $this->db->table('team_memberships')
+            ->select('user_id')
+            ->where('tenant_id', $tenantId)
+            ->where('team_id', $teamId)
+            ->where('to_on', null)
+            ->get()
+            ->getResultArray();
+
+        return array_map('intval', array_column($rows, 'user_id'));
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    public function attendance(int $tenantId, string $month): array
+    {
+        if (! $this->db->tableExists('attendance')) {
+            return [];
+        }
+
+        return $this->db->table('attendance a')
+            ->select('a.*, u.name AS user_name')
+            ->join('users u', 'u.id = a.user_id', 'left')
+            ->where('a.tenant_id', $tenantId)
+            ->like('a.work_date', $month, 'after')
+            ->orderBy('a.work_date', 'DESC')
+            ->get()
+            ->getResultArray();
+    }
+
+    /**
+     * @param array<string, mixed> $input
+     */
+    public function markAttendance(int $tenantId, int $userId, array $input, bool $correcting, int $actorId): void
+    {
+        $date = trim((string) ($input['work_date'] ?? date('Y-m-d')));
+        $status = (string) ($input['status'] ?? 'present');
+
+        if (! preg_match('/^\d{4}-\d{2}-\d{2}$/', $date) || ! in_array($status, ['present', 'leave', 'absent', 'late'], true)) {
+            throw new RuntimeException('Choose a date and an attendance status.');
+        }
+
+        $now = date('Y-m-d H:i:s');
+        $existing = $this->db->table('attendance')
+            ->where('tenant_id', $tenantId)
+            ->where('user_id', $userId)
+            ->where('work_date', $date)
+            ->get()
+            ->getRowArray();
+        $data = [
+            'status'     => $status,
+            'note'       => trim((string) ($input['note'] ?? '')) ?: null,
+            'updated_at' => $now,
+        ];
+
+        if (($input['action'] ?? '') === 'out') {
+            $data['check_out'] = $now;
+            $data['check_out_lat'] = $this->coord($input['lat'] ?? null);
+            $data['check_out_lng'] = $this->coord($input['lng'] ?? null);
+        } elseif ($status === 'present' || $status === 'late') {
+            $data['check_in'] = $existing['check_in'] ?? $now;
+            $data['check_in_lat'] = $existing['check_in_lat'] ?? $this->coord($input['lat'] ?? null);
+            $data['check_in_lng'] = $existing['check_in_lng'] ?? $this->coord($input['lng'] ?? null);
+        }
+
+        if ($correcting) {
+            $data['corrected_by'] = $actorId;
+        }
+
+        if ($existing === null) {
+            $data['tenant_id']  = $tenantId;
+            $data['user_id']    = $userId;
+            $data['work_date']  = $date;
+            $data['created_at'] = $now;
+            $this->db->table('attendance')->insert($data);
+
+            return;
+        }
+
+        $this->db->table('attendance')->where('id', (int) $existing['id'])->update($data);
+    }
+
+    /**
+     * @param array<string, mixed> $input
+     */
+    public function recordSale(int $tenantId, int $actorId, int $plotId, string $status, array $input): void
+    {
+        if (! in_array($status, SiteService::SALE_STATUSES, true)) {
+            return;
+        }
+
+        $plot = $this->db->table('plots')->where('tenant_id', $tenantId)->where('id', $plotId)->where('deleted_at', null)->get()->getRowArray();
+        $leadId = (int) ($input['lead_id'] ?? 0);
+        $staffId = (int) ($input['credited_user_id'] ?? 0);
+        $lead = $leadId > 0 ? $this->db->table('leads')->where('tenant_id', $tenantId)->where('id', $leadId)->where('deleted_at', null)->get()->getRowArray() : null;
+
+        if ($plot === null || $lead === null || $staffId < 1) {
+            throw new RuntimeException('Booked, sold or registered plots need the credited staff member and the lead.');
+        }
+
+        $value = trim((string) ($input['sale_value'] ?? ''));
+        $minor = $value === '' ? (int) $plot['price_minor'] : BookService::rupeesToMinor($value);
+        $now = date('Y-m-d H:i:s');
+        $profile = $this->db->table('staff_profiles')->select('team_id, incentive_eligible')->where('tenant_id', $tenantId)->where('user_id', $staffId)->get()->getRowArray();
+        $teamId = (int) ($profile['team_id'] ?? 0);
+        $headId = (int) ($input['head_user_id'] ?? 0);
+        $splitId = (int) ($input['split_user_id'] ?? 0);
+        $splitMinor = BookService::rupeesToMinor((string) ($input['split_amount'] ?? ''));
+
+        $this->db->table('sales')->insert([
+            'tenant_id'        => $tenantId,
+            'plot_id'          => $plotId,
+            'project_id'       => (int) $plot['project_id'],
+            'lead_id'          => $leadId,
+            'credited_user_id' => $staffId,
+            'head_user_id'     => $headId > 0 ? $headId : null,
+            'team_id'          => $teamId > 0 ? $teamId : null,
+            'sale_value_minor' => $minor,
+            'sale_on'          => date('Y-m-d'),
+            'source'           => $lead['source'] ?? null,
+            'plot_status'      => $status,
+            'split_user_id'    => $splitId > 0 ? $splitId : null,
+            'split_minor'      => $splitMinor,
+            'created_by'       => $actorId,
+            'created_at'       => $now,
+        ]);
+        $saleId = (int) $this->db->insertID();
+        $percent = (float) ($this->setting($tenantId, 'incentive_percent') ?? '2');
+        $amount = (int) round($minor * $percent / 100);
+        $eligible = (int) ($profile['incentive_eligible'] ?? 1);
+        $this->db->table('incentives')->insert([
+            'tenant_id'    => $tenantId,
+            'sale_id'      => $saleId,
+            'user_id'      => $staffId,
+            'status'       => $eligible === 0 ? 'not_eligible' : 'pending',
+            'amount_minor' => $amount,
+            'rule_note'    => $percent . '% of the sale value',
+            'created_at'   => $now,
+            'updated_at'   => $now,
+        ]);
+
+        if ($splitId > 0 && $splitMinor > 0) {
+            $this->db->table('incentives')->insert([
+                'tenant_id'    => $tenantId,
+                'sale_id'      => $saleId,
+                'user_id'      => $splitId,
+                'status'       => 'pending',
+                'amount_minor' => $splitMinor,
+                'rule_note'    => 'Split credit',
+                'created_at'   => $now,
+                'updated_at'   => $now,
+            ]);
+        }
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    public function incentives(int $tenantId): array
+    {
+        if (! $this->db->tableExists('incentives')) {
+            return [];
+        }
+
+        return $this->db->table('incentives i')
+            ->select('i.*, u.name AS user_name, s.plot_status, s.sale_value_minor, p.plot_no, pr.name AS project_name')
+            ->join('sales s', 's.id = i.sale_id')
+            ->join('users u', 'u.id = i.user_id', 'left')
+            ->join('plots p', 'p.id = s.plot_id', 'left')
+            ->join('projects pr', 'pr.id = s.project_id', 'left')
+            ->where('i.tenant_id', $tenantId)
+            ->where('s.deleted_at', null)
+            ->orderBy('i.id', 'DESC')
+            ->get()
+            ->getResultArray();
+    }
+
+    public function setIncentive(int $tenantId, int $id, string $status, int $actorId): void
+    {
+        if (! in_array($status, ['approved', 'paid', 'on_hold', 'cancelled'], true)) {
+            throw new RuntimeException('Choose an incentive status.');
+        }
+
+        $row = $this->db->table('incentives')->where('tenant_id', $tenantId)->where('id', $id)->get()->getRowArray();
+
+        if ($row === null) {
+            throw new RuntimeException('That incentive is not in this workspace.');
+        }
+
+        $now = date('Y-m-d H:i:s');
+        $data = ['status' => $status, 'updated_at' => $now, 'approver_id' => $actorId];
+
+        if ($status === 'approved') {
+            $data['approved_at'] = $now;
+        }
+
+        if ($status === 'paid') {
+            $data['paid_at'] = $now;
+            $data['approved_at'] = $row['approved_at'] ?? $now;
+        }
+
+        $this->db->table('incentives')->where('id', $id)->update($data);
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    public function templates(int $tenantId): array
+    {
+        if (! $this->db->tableExists('whatsapp_templates')) {
+            return [];
+        }
+
+        return $this->db->table('whatsapp_templates')
+            ->where('tenant_id', $tenantId)
+            ->where('deleted_at', null)
+            ->orderBy('name', 'ASC')
+            ->get()
+            ->getResultArray();
+    }
+
+    /**
+     * @param array<string, mixed> $input
+     */
+    public function saveTemplate(int $tenantId, ?int $id, array $input): void
+    {
+        $name = trim((string) ($input['name'] ?? ''));
+        $body = trim((string) ($input['body'] ?? ''));
+
+        if ($name === '' || $body === '') {
+            throw new RuntimeException('A template needs a name and a message.');
+        }
+
+        $now = date('Y-m-d H:i:s');
+        $data = [
+            'name'       => $name,
+            'language'   => trim((string) ($input['language'] ?? 'en')) ?: 'en',
+            'body'       => $body,
+            'active'     => empty($input['active']) ? 0 : 1,
+            'updated_at' => $now,
+        ];
+
+        if ($id === null) {
+            $data['tenant_id']  = $tenantId;
+            $data['created_at'] = $now;
+            $this->db->table('whatsapp_templates')->insert($data);
+
+            return;
+        }
+
+        $this->db->table('whatsapp_templates')->where('tenant_id', $tenantId)->where('id', $id)->update($data);
+    }
+
+    public function queueMessage(int $tenantId, int $userId, int $leadId, int $templateId): void
+    {
+        $lead = $this->db->table('leads')->where('tenant_id', $tenantId)->where('id', $leadId)->where('deleted_at', null)->get()->getRowArray();
+        $template = $this->db->table('whatsapp_templates')->where('tenant_id', $tenantId)->where('id', $templateId)->where('deleted_at', null)->get()->getRowArray();
+
+        if ($lead === null || $template === null) {
+            throw new RuntimeException('Choose a lead and a template.');
+        }
+
+        $phone = (string) ($lead['phone_number'] ?? $lead['phone'] ?? '');
+        $body = strtr((string) $template['body'], [
+            '{{name}}'  => (string) $lead['name'],
+            '{{phone}}' => $phone,
+        ]);
+        $this->db->table('whatsapp_messages')->insert([
+            'tenant_id'   => $tenantId,
+            'lead_id'     => $leadId,
+            'user_id'     => $userId,
+            'direction'   => 'out',
+            'template_id' => $templateId,
+            'to_phone'    => $phone,
+            'subject'     => (string) $template['name'],
+            'body'        => $body,
+            'status'      => 'failed',
+            'created_at'  => date('Y-m-d H:i:s'),
+        ]);
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    public function messages(int $tenantId): array
+    {
+        if (! $this->db->tableExists('whatsapp_messages')) {
+            return [];
+        }
+
+        $rows = $this->db->table('whatsapp_messages m')
+            ->select('m.id, m.lead_id, m.to_phone, m.subject, m.body, m.status, m.created_at, l.name AS lead_name, IFNULL(l.phone_number, l.phone) AS lead_phone, t.name AS template_name, u.name AS user_name', false)
+            ->join('leads l', 'l.id = m.lead_id', 'left')
+            ->join('whatsapp_templates t', 't.id = m.template_id', 'left')
+            ->join('users u', 'u.id = m.user_id', 'left')
+            ->where('m.tenant_id', $tenantId)
+            ->orderBy('m.id', 'DESC')
+            ->get()
+            ->getResultArray();
+
+        foreach ($rows as &$row) {
+            if (trim((string) ($row['to_phone'] ?? '')) === '') {
+                $row['to_phone'] = (string) ($row['lead_phone'] ?? '');
+            }
+
+            if (trim((string) ($row['subject'] ?? '')) === '') {
+                $row['subject'] = (string) ($row['template_name'] ?? 'Message');
+            }
+
+            $row['status_label'] = match ((string) $row['status']) {
+                'delivered' => 'Delivered',
+                'read'      => 'Read',
+                'sent'      => 'Sent',
+                'queued'    => 'Queued',
+                default     => 'Not delivered',
+            };
+        }
+        unset($row);
+
+        return $rows;
+    }
+
+    public function setting(int $tenantId, string $key): ?string
+    {
+        $row = $this->db->table('tenant_settings')
+            ->where('tenant_id', $tenantId)
+            ->where('setting_key', $key)
+            ->get()
+            ->getRowArray();
+
+        return $row['setting_value'] ?? null;
+    }
+
+    public function saveSetting(int $tenantId, string $key, string $value): void
+    {
+        $existing = $this->setting($tenantId, $key);
+
+        if ($existing === null && ! $this->db->table('tenant_settings')->where('tenant_id', $tenantId)->where('setting_key', $key)->countAllResults()) {
+            $this->db->table('tenant_settings')->insert([
+                'tenant_id'     => $tenantId,
+                'setting_key'   => $key,
+                'setting_value' => $value,
+            ]);
+
+            return;
+        }
+
+        $this->db->table('tenant_settings')->where('tenant_id', $tenantId)->where('setting_key', $key)->update([
+            'setting_value' => $value,
+        ]);
+    }
+
+    /**
+     * Company for Owner, Admin, Manager and Viewer. Team for a Team Head. Own work for an advisor.
+     *
+     * @return array{level: string, label: string, user_ids: ?list<int>, team_ids: ?list<int>}
+     */
+    public function reportScope(int $tenantId, int $userId, string $roleName, bool $isOwner): array
+    {
+        if ($isOwner || in_array($roleName, ['Owner', 'Admin', 'Manager', 'Viewer'], true)) {
+            return ['level' => 'company', 'label' => 'Company', 'user_ids' => null, 'team_ids' => null];
+        }
+
+        if ($roleName === 'Team Head' && $this->db->tableExists('teams')) {
+            $teams = $this->db->table('teams')
+                ->select('id, name')
+                ->where('tenant_id', $tenantId)
+                ->where('head_user_id', $userId)
+                ->where('deleted_at', null)
+                ->get()
+                ->getResultArray();
+            $teamIds = array_map(static fn (array $row): int => (int) $row['id'], $teams);
+
+            if ($teamIds !== []) {
+                $members = [$userId];
+                $profiles = $this->db->table('staff_profiles')
+                    ->select('user_id')
+                    ->where('tenant_id', $tenantId)
+                    ->where('deleted_at', null)
+                    ->whereIn('team_id', $teamIds)
+                    ->get()
+                    ->getResultArray();
+
+                foreach ($profiles as $profile) {
+                    $members[] = (int) $profile['user_id'];
+                }
+
+                $label = count($teams) === 1 ? (string) $teams[0]['name'] : 'Your teams';
+
+                return [
+                    'level'    => 'team',
+                    'label'    => $label,
+                    'user_ids' => array_values(array_unique($members)),
+                    'team_ids' => $teamIds,
+                ];
+            }
+        }
+
+        return ['level' => 'own', 'label' => 'Your work', 'user_ids' => [$userId], 'team_ids' => []];
+    }
+
+    /**
+     * @param array{level?: string, label?: string, user_ids?: ?list<int>, team_ids?: ?list<int>}|null $scope
+     * @return array<string, mixed>
+     */
+    public function dashboard(int $tenantId, ?array $scope = null): array
+    {
+        $userIds = $scope['user_ids'] ?? null;
+        $now = date('Y-m-d H:i:s');
+        $openFollowups = $this->countWhere('followups', $tenantId, $userIds, 'IFNULL(assigned_user_id, user_id)', 'done_at IS NULL');
+        $plots = $this->labelRows($tenantId, 'plot_status', $this->grouped($tenantId, 'plots', 'status'), 'status');
+        $sources = $this->labelRows($tenantId, 'lead_source', $this->grouped($tenantId, 'leads', 'source', 'owner_id', $userIds), 'source');
+        $leadStatus = $this->labelRows($tenantId, 'lead_status', $this->grouped($tenantId, 'leads', 'status', 'owner_id', $userIds), 'status');
+        $visitStatus = $this->grouped($tenantId, 'site_visits', 'status', 'staff_id', $userIds);
+        $followSplit = $this->applyUsers($this->db->table('followups')
+            ->select(
+                "SUM(done_at IS NOT NULL) AS done, SUM(done_at IS NULL AND next_at IS NOT NULL AND next_at < " . $this->db->escape($now) . ") AS overdue, SUM(done_at IS NULL AND (next_at IS NULL OR next_at >= " . $this->db->escape($now) . ")) AS upcoming",
+                false,
+            )
+            ->where('tenant_id', $tenantId)
+            ->where('deleted_at', null), 'IFNULL(assigned_user_id, user_id)', $userIds)
+            ->get()
+            ->getRowArray();
+        $start = date('Y-m-d', strtotime('-13 days'));
+        $intakeRows = $this->applyUsers($this->db->table('leads')
+            ->select('DATE(created_at) AS day, COUNT(*) AS total', false)
+            ->where('tenant_id', $tenantId)
+            ->where('deleted_at', null)
+            ->where('created_at >=', $start . ' 00:00:00'), 'owner_id', $userIds)
+            ->groupBy('DATE(created_at)', false)
+            ->get()
+            ->getResultArray();
+        $intakeMap = [];
+
+        foreach ($intakeRows as $row) {
+            $intakeMap[(string) $row['day']] = (int) $row['total'];
+        }
+
+        $intake = [];
+
+        for ($i = 0; $i < 14; $i++) {
+            $day = date('Y-m-d', strtotime($start . ' +' . $i . ' days'));
+            $intake[] = ['day' => $day, 'total' => $intakeMap[$day] ?? 0];
+        }
+
+        $ownersBuilder = $this->db->table('leads l')
+            ->select("l.owner_id, COALESCE(u.name, 'Unassigned') AS name, COUNT(*) AS total", false)
+            ->join('users u', 'u.id = l.owner_id', 'left')
+            ->where('l.tenant_id', $tenantId)
+            ->where('l.deleted_at', null);
+        $owners = $this->applyUsers($ownersBuilder, 'l.owner_id', $userIds)
+            ->groupBy('l.owner_id')
+            ->groupBy('u.name')
+            ->orderBy('total', 'DESC')
+            ->limit(6)
+            ->get()
+            ->getResultArray();
+        $visitedBuilder = $this->db->table('site_visits')->select('COUNT(DISTINCT lead_id) AS total', false)->where('tenant_id', $tenantId)->where('deleted_at', null);
+        $visited = (int) ($this->applyUsers($visitedBuilder, 'staff_id', $userIds)->get()->getRowArray()['total'] ?? 0);
+        $booked = 0;
+
+        if ($this->db->tableExists('sales')) {
+            $bookedBuilder = $this->db->table('sales')->select('COUNT(DISTINCT lead_id) AS total', false)->where('tenant_id', $tenantId)->where('deleted_at', null);
+            $booked = (int) ($this->applyUsers($bookedBuilder, 'credited_user_id', $userIds)->get()->getRowArray()['total'] ?? 0);
+        }
+
+        $attendance = [];
+
+        if ($this->db->tableExists('attendance')) {
+            $attendanceBuilder = $this->db->table('attendance')
+                ->select('status, COUNT(*) AS total')
+                ->where('tenant_id', $tenantId)
+                ->where('work_date >=', date('Y-m-01'));
+            $attendance = $this->applyUsers($attendanceBuilder, 'user_id', $userIds)
+                ->groupBy('status')
+                ->get()
+                ->getResultArray();
+        }
+
+        $incentives = [];
+        $pendingIncentive = ['total' => 0, 'amount_minor' => 0];
+
+        if ($this->db->tableExists('incentives')) {
+            $incentiveBuilder = $this->db->table('incentives')
+                ->select('status, COUNT(*) AS total, SUM(amount_minor) AS amount_minor')
+                ->where('tenant_id', $tenantId);
+            $incentives = $this->applyUsers($incentiveBuilder, 'user_id', $userIds)
+                ->groupBy('status')
+                ->orderBy('amount_minor', 'DESC')
+                ->get()
+                ->getResultArray();
+
+            foreach ($incentives as $row) {
+                if ((string) $row['status'] === 'pending') {
+                    $pendingIncentive = ['total' => (int) $row['total'], 'amount_minor' => (int) $row['amount_minor']];
+                }
+            }
+        }
+
+        $leadCount = $this->countWhere('leads', $tenantId, $userIds, 'owner_id');
+        $dueBuilder = $this->db->table('followups f')->select('f.body, f.next_at, l.name AS lead_name')->join('leads l', 'l.id = f.lead_id')->where('f.tenant_id', $tenantId)->where('f.deleted_at', null)->where('f.done_at', null)->where('f.next_at <=', date('Y-m-d 23:59:59'));
+        $performance = $this->performance($tenantId, $userIds, is_array($scope) ? ($scope['team_ids'] ?? null) : null, $now);
+
+        return [
+            'leads'      => $leadCount,
+            'followups'  => $openFollowups,
+            'visits'     => $this->countWhere('site_visits', $tenantId, $userIds, 'staff_id', "status = 'scheduled'"),
+            'available'  => $this->db->table('plots')->where('tenant_id', $tenantId)->where('deleted_at', null)->where('status', 'available')->countAllResults(),
+            'plots'      => $plots,
+            'sources'    => $sources,
+            'statuses'   => $leadStatus,
+            'visit_status' => $visitStatus,
+            'follow_split' => [
+                'done'     => (int) ($followSplit['done'] ?? 0),
+                'overdue'  => (int) ($followSplit['overdue'] ?? 0),
+                'upcoming' => (int) ($followSplit['upcoming'] ?? 0),
+            ],
+            'intake'     => $intake,
+            'owners'     => $owners,
+            'conversion' => [
+                'leads'   => $leadCount,
+                'visited' => $visited,
+                'booked'  => $booked,
+            ],
+            'attendance' => $attendance,
+            'incentives' => $incentives,
+            'pending_incentive' => $pendingIncentive,
+            'funnel'     => $this->statusFunnel($tenantId, $userIds),
+            'staff'      => $performance['staff'],
+            'teams'      => $performance['teams'],
+            'projects'   => $performance['projects'],
+            'due'        => $this->applyUsers($dueBuilder, 'IFNULL(f.assigned_user_id, f.user_id)', $userIds)->orderBy('f.next_at', 'ASC')->limit(6)->get()->getResultArray(),
+        ];
+    }
+
+    /**
+     * @param ?list<int> $userIds
+     * @param ?list<int> $teamIds
+     * @return array{staff: list<array<string, mixed>>, teams: list<array<string, mixed>>, projects: list<array<string, mixed>>}
+     */
+    private function performance(int $tenantId, ?array $userIds, ?array $teamIds, string $now): array
+    {
+        $people = $this->db->table('users u')
+            ->select('u.id, u.name, r.name AS role_name')
+            ->join('tenant_users tu', 'tu.user_id = u.id')
+            ->join('roles r', 'r.id = tu.role_id', 'left')
+            ->where('tu.tenant_id', $tenantId)
+            ->where('u.deleted_at', null)
+            ->orderBy('u.name', 'ASC');
+        $people = $this->applyUsers($people, 'u.id', $userIds)->get()->getResultArray();
+        $leads = $this->tally('leads', 'owner_id', $tenantId, $userIds, true);
+        $followups = $this->tally('followups', 'IFNULL(assigned_user_id, user_id)', $tenantId, $userIds, true);
+        $overdue = $this->tally('followups', 'IFNULL(assigned_user_id, user_id)', $tenantId, $userIds, true, 'done_at IS NULL AND next_at IS NOT NULL AND next_at < ' . $this->db->escape($now));
+        $visits = $this->tally('site_visits', 'staff_id', $tenantId, $userIds, true);
+        $bookings = $this->db->tableExists('sales') ? $this->tally('sales', 'credited_user_id', $tenantId, $userIds, true) : [];
+        $staff = [];
+
+        foreach ($people as $person) {
+            $id = (int) $person['id'];
+            $staff[] = [
+                'name'      => (string) $person['name'],
+                'role_name' => (string) ($person['role_name'] ?? ''),
+                'leads'     => $leads[$id] ?? 0,
+                'followups' => $followups[$id] ?? 0,
+                'overdue'   => $overdue[$id] ?? 0,
+                'visits'    => $visits[$id] ?? 0,
+                'bookings'  => $bookings[$id] ?? 0,
+            ];
+        }
+
+        usort($staff, static fn (array $a, array $b): int => [$b['bookings'], $b['leads'], $a['name']] <=> [$a['bookings'], $a['leads'], $b['name']]);
+
+        return [
+            'staff'    => $staff,
+            'teams'    => $this->teamRows($tenantId, $teamIds, $leads, $followups, $visits, $bookings),
+            'projects' => $this->projectRows($tenantId, $userIds),
+        ];
+    }
+
+    /**
+     * @param array<int, int> $leads
+     * @param array<int, int> $followups
+     * @param array<int, int> $visits
+     * @param array<int, int> $bookings
+     * @param ?list<int> $teamIds
+     * @return list<array<string, mixed>>
+     */
+    private function teamRows(int $tenantId, ?array $teamIds, array $leads, array $followups, array $visits, array $bookings): array
+    {
+        if (! $this->db->tableExists('teams') || $teamIds === []) {
+            return [];
+        }
+
+        $teams = $this->db->table('teams t')
+            ->select('t.id, t.name, u.name AS head_name')
+            ->join('users u', 'u.id = t.head_user_id', 'left')
+            ->where('t.tenant_id', $tenantId)
+            ->where('t.deleted_at', null)
+            ->orderBy('t.name', 'ASC');
+
+        if ($teamIds !== null) {
+            $teams->whereIn('t.id', array_map('intval', $teamIds));
+        }
+
+        $rows = [];
+
+        foreach ($teams->get()->getResultArray() as $team) {
+            $members = $this->db->table('staff_profiles')
+                ->select('user_id')
+                ->where('tenant_id', $tenantId)
+                ->where('team_id', (int) $team['id'])
+                ->where('deleted_at', null)
+                ->get()
+                ->getResultArray();
+            $ids = array_map(static fn (array $row): int => (int) $row['user_id'], $members);
+            $head = $this->db->table('teams')->select('head_user_id')->where('id', (int) $team['id'])->get()->getRowArray();
+
+            if ((int) ($head['head_user_id'] ?? 0) > 0) {
+                $ids[] = (int) $head['head_user_id'];
+            }
+
+            $ids = array_values(array_unique($ids));
+            $sum = static function (array $map) use ($ids): int {
+                $total = 0;
+
+                foreach ($ids as $id) {
+                    $total += $map[$id] ?? 0;
+                }
+
+                return $total;
+            };
+            $rows[] = [
+                'name'      => (string) $team['name'],
+                'head_name' => (string) ($team['head_name'] ?? ''),
+                'leads'     => $sum($leads),
+                'followups' => $sum($followups),
+                'visits'    => $sum($visits),
+                'bookings'  => $sum($bookings),
+            ];
+        }
+
+        return $rows;
+    }
+
+    /**
+     * @param ?list<int> $userIds
+     * @return list<array<string, mixed>>
+     */
+    private function projectRows(int $tenantId, ?array $userIds): array
+    {
+        $projects = $this->db->table('projects')->select('id, name')->where('tenant_id', $tenantId)->where('deleted_at', null)->orderBy('name', 'ASC')->get()->getResultArray();
+        $plots = $this->db->table('plots')
+            ->select('project_id, status, COUNT(*) AS total')
+            ->where('tenant_id', $tenantId)
+            ->where('deleted_at', null)
+            ->groupBy('project_id')
+            ->groupBy('status')
+            ->get()
+            ->getResultArray();
+        $byProject = [];
+
+        foreach ($plots as $row) {
+            $byProject[(int) $row['project_id']][(string) $row['status']] = (int) $row['total'];
+        }
+
+        $sales = [];
+
+        if ($this->db->tableExists('sales')) {
+            $builder = $this->db->table('sales')
+                ->select('project_id, COUNT(*) AS total, SUM(sale_value_minor) AS amount', false)
+                ->where('tenant_id', $tenantId)
+                ->where('deleted_at', null);
+            $saleRows = $this->applyUsers($builder, 'credited_user_id', $userIds)->groupBy('project_id')->get()->getResultArray();
+
+            foreach ($saleRows as $row) {
+                $sales[(int) $row['project_id']] = ['total' => (int) $row['total'], 'amount' => (int) $row['amount']];
+            }
+        }
+
+        $out = [];
+
+        foreach ($projects as $project) {
+            $id = (int) $project['id'];
+            $counts = $byProject[$id] ?? [];
+            $out[] = [
+                'name'             => (string) $project['name'],
+                'available'        => $counts['available'] ?? 0,
+                'hold'             => $counts['hold'] ?? 0,
+                'booked'           => $counts['booked'] ?? 0,
+                'sold'             => $counts['sold'] ?? 0,
+                'registered'       => $counts['registered'] ?? 0,
+                'blocked'          => $counts['blocked'] ?? 0,
+                'sales'            => $sales[$id]['total'] ?? 0,
+                'sale_value_minor' => $sales[$id]['amount'] ?? 0,
+            ];
+        }
+
+        return $out;
+    }
+
+    /**
+     * Lead stages in the same order as the lead form.
+     *
+     * @param ?list<int> $userIds
+     * @return list<array<string, mixed>>
+     */
+    private function statusFunnel(int $tenantId, ?array $userIds): array
+    {
+        $stages = ['New', 'Qualified', 'Follow Up', 'Proposal Sent', 'Site Visit Scheduled', 'Negotiation', 'Booked', 'Lost'];
+        $alias = [
+            'new' => 'New', 'contacted' => 'Qualified', 'qualified' => 'Qualified',
+            'followup' => 'Follow Up', 'follow up' => 'Follow Up', 'follow-up' => 'Follow Up',
+            'proposal sent' => 'Proposal Sent', 'site_visit' => 'Site Visit Scheduled',
+            'site visit scheduled' => 'Site Visit Scheduled', 'site_visit_done' => 'Site Visit Scheduled',
+            'negotiation' => 'Negotiation', 'booked' => 'Booked', 'lost' => 'Lost',
+            'not_interested' => 'Lost', 'not interested' => 'Lost',
+        ];
+        $counts = [];
+
+        foreach ($this->grouped($tenantId, 'leads', 'lead_stage', 'owner_id', $userIds) as $row) {
+            $raw = strtolower(trim((string) ($row['lead_stage'] ?? '')));
+            $label = $alias[$raw] ?? ($raw === '' ? 'New' : ucwords($raw));
+            $counts[$label] = ($counts[$label] ?? 0) + (int) $row['total'];
+        }
+
+        $out = [];
+
+        foreach ($stages as $stage) {
+            $out[] = ['label' => $stage, 'total' => $counts[$stage] ?? 0];
+            unset($counts[$stage]);
+        }
+
+        foreach ($counts as $label => $total) {
+            if ($total > 0) {
+                $out[] = ['label' => $label, 'total' => $total];
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * @param ?list<int> $userIds
+     */
+    private function countWhere(string $table, int $tenantId, ?array $userIds, string $userColumn, ?string $extra = null): int
+    {
+        $builder = $this->db->table($table)->where('tenant_id', $tenantId);
+
+        if (in_array($table, ['leads', 'followups', 'site_visits', 'sales', 'plots'], true)) {
+            $builder->where('deleted_at', null);
+        }
+
+        if ($extra !== null) {
+            $builder->where($extra, null, false);
+        }
+
+        return $this->applyUsers($builder, $userColumn, $userIds)->countAllResults();
+    }
+
+    /**
+     * @param ?list<int> $userIds
+     * @return array<int, int>
+     */
+    private function tally(string $table, string $userColumn, int $tenantId, ?array $userIds, bool $soft, ?string $extra = null): array
+    {
+        $builder = $this->db->table($table)
+            ->select($userColumn . ' AS user_id, COUNT(*) AS total', false)
+            ->where('tenant_id', $tenantId);
+
+        if ($soft) {
+            $builder->where('deleted_at', null);
+        }
+
+        if ($extra !== null) {
+            $builder->where($extra, null, false);
+        }
+
+        $map = [];
+
+        foreach ($this->applyUsers($builder, $userColumn, $userIds)->groupBy($userColumn, false)->get()->getResultArray() as $row) {
+            $map[(int) $row['user_id']] = (int) $row['total'];
+        }
+
+        return $map;
+    }
+
+    /**
+     * @param ?list<int> $userIds
+     */
+    private function applyUsers(\CodeIgniter\Database\BaseBuilder $builder, string $column, ?array $userIds): \CodeIgniter\Database\BaseBuilder
+    {
+        if ($userIds === null) {
+            return $builder;
+        }
+
+        $ids = array_values(array_map('intval', $userIds));
+
+        if ($ids === []) {
+            return $builder->where('1 = 0', null, false);
+        }
+
+        return $builder->whereIn($column, $ids, str_contains($column, '(') ? false : null);
+    }
+
+    /**
+     * @param ?list<int> $userIds
+     * @return list<array<string, mixed>>
+     */
+    private function grouped(int $tenantId, string $table, string $column, ?string $userColumn = null, ?array $userIds = null): array
+    {
+        $builder = $this->db->table($table)
+            ->select($column . ', COUNT(*) AS total')
+            ->where('tenant_id', $tenantId)
+            ->where('deleted_at', null);
+
+        return $this->applyUsers($builder, $userColumn ?? $column, $userColumn === null ? null : $userIds)
+            ->groupBy($column)
+            ->get()
+            ->getResultArray();
+    }
+
+    /**
+     * @param list<array<string, mixed>> $rows
+     * @return list<array<string, mixed>>
+     */
+    private function labelRows(int $tenantId, string $kind, array $rows, string $column): array
+    {
+        $labels = [];
+
+        foreach ($this->options($tenantId, $kind) as $item) {
+            $labels[(string) $item['code']] = (string) $item['label'];
+        }
+
+        $order = array_keys($labels);
+
+        foreach ($rows as &$row) {
+            $code = (string) ($row[$column] ?? '');
+            $row['label'] = $labels[$code] ?? ucfirst(str_replace(['_', '-'], ' ', $code === '' ? 'None' : $code));
+        }
+        unset($row);
+
+        usort($rows, static function (array $a, array $b) use ($order, $column): int {
+            $left = array_search((string) ($a[$column] ?? ''), $order, true);
+            $right = array_search((string) ($b[$column] ?? ''), $order, true);
+
+            return ($left === false ? 999 : $left) <=> ($right === false ? 999 : $right);
+        });
+
+        return $rows;
+    }
+
+    /**
+     * @param list<int> $leadIds
+     */
+    public function bulkTransfer(int $tenantId, array $leadIds, int $toUserId, int $byUserId, string $reason, SiteService $sites): int
+    {
+        $count = 0;
+
+        foreach ($leadIds as $leadId) {
+            $sites->transfer($tenantId, (int) $leadId, $toUserId, $byUserId, $reason);
+            $count++;
+        }
+
+        return $count;
+    }
+
+    public function restoreLead(int $tenantId, int $id): void
+    {
+        $row = $this->db->table('leads')->where('tenant_id', $tenantId)->where('id', $id)->where('deleted_at !=', null)->get()->getRowArray();
+
+        if ($row === null) {
+            throw new RuntimeException('That lead is not in the removed list.');
+        }
+
+        $this->db->table('leads')->where('id', $id)->update(['deleted_at' => null, 'updated_at' => date('Y-m-d H:i:s')]);
+    }
+
+    private function coord(mixed $value): ?string
+    {
+        $value = trim((string) $value);
+
+        if ($value === '' || ! is_numeric($value)) {
+            return null;
+        }
+
+        return number_format((float) $value, 7, '.', '');
+    }
+}
