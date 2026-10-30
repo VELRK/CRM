@@ -79,11 +79,13 @@ function useCompanyLogo(stamp) {
     }, [stamp]);
     return url;
 }
+function brandIcon() {
+    return html`<span class="brand-mark" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 20V9l8-5 8 5v11"/><path d="M9 20v-6h6v6"/></svg></span>`;
+}
 function companyMark(company, logoUrl) {
     if (!company) return null;
-    const letter = String(company.companyName || 'C').slice(0, 1);
     return html`<div class="company-strip">
-        ${logoUrl ? html`<img src=${logoUrl} alt="" />` : html`<span class="brand-mark">${letter}</span>`}
+        ${logoUrl ? html`<img src=${logoUrl} alt="" />` : brandIcon()}
         <div><strong>${company.companyName || 'Company'}</strong><p>${[company.companyAdminEmail, company.phone, company.address].filter(Boolean).join(' · ') || 'Set the name, email, address, and logo in Settings.'}</p></div>
     </div>`;
 }
@@ -2556,6 +2558,7 @@ function CompanyBoard({ onSaved }) {
             if (!response.ok || payload.ok === false) throw new Error(payload.error || 'The logo was not saved.');
             setForm(payload.data);
             setSaved('Logo updated.');
+            if (onSaved) await onSaved();
         } catch (e) { setError(e.message); }
     }
     if (!form) return html`<p class="empty-line">${error || 'Opening settings…'}</p>`;
@@ -2565,7 +2568,7 @@ function CompanyBoard({ onSaved }) {
         ${error ? html`<p class="error">${error}</p>` : null}
         ${saved ? html`<p class="ok-line">${saved}</p>` : null}
         <div class="company-strip">
-            ${logoUrl ? html`<img class="logo-preview" src=${logoUrl} alt="" />` : html`<span class="brand-mark">${String(form.companyName || 'C').slice(0, 1)}</span>`}
+            ${logoUrl ? html`<img class="logo-preview" src=${logoUrl} alt="" />` : brandIcon()}
             <label class="field">Logo<input type="file" accept="image/png,image/jpeg,image/webp" onChange=${uploadLogo} /></label>
         </div>
         <div class="form-grid">
@@ -2574,9 +2577,6 @@ function CompanyBoard({ onSaved }) {
             ${field('Phone', html`<input inputMode="numeric" value=${form.phone || ''} onInput=${set('phone')} />`)}
             ${field('Address', html`<input value=${form.address || ''} onInput=${set('address')} />`, true)}
             ${field('Contact name', html`<input value=${form.companyAdminName || ''} onInput=${set('companyAdminName')} required />`)}
-            ${field('Plan', html`<input value=${form.companyPlan || ''} readOnly />`)}
-            ${field('Max users', html`<input value=${form.maxUsers ?? ''} readOnly />`)}
-            ${field('Created', html`<input value=${form.insertedDate || ''} readOnly />`)}
         </div>
         <div class="row-actions"><button class="primary" type="submit">Save</button></div>
     </form>`;
@@ -2785,10 +2785,12 @@ function NoticeBoard() {
 }
 function App() {
     const [user, setUser] = useState(null);
+    const [company, setCompany] = useState(null);
     const [ready, setReady] = useState(false);
     const [screen, setScreen] = useState('home');
     const [setup, setSetup] = useState(() => new URLSearchParams(location.search).get('setup') || '');
     const [passwordOpen, setPasswordOpen] = useState(false);
+    const logoUrl = useCompanyLogo(company?.logo ? (company.updatedDate || 'logo') : '');
     useEffect(() => {
         if (!localStorage.getItem(tokenKey)) {
             setReady(true);
@@ -2796,6 +2798,10 @@ function App() {
         }
         call('/api/v1/me').then(setUser).catch(() => localStorage.removeItem(tokenKey)).finally(() => setReady(true));
     }, []);
+    useEffect(() => {
+        if (!user) { setCompany(null); return; }
+        call('/api/v1/company').then(setCompany).catch(() => {});
+    }, [user]);
     if (setup) return html`<${SetPassword} token=${setup} onDone=${() => { history.replaceState({}, '', apiPath('/desk/')); setSetup(''); }} />`;
     if (!ready) return html`<main class="login"><p>Opening Atrium…</p></main>`;
     if (!user) return html`<${Login} onIn=${setUser} />`;
@@ -2805,7 +2811,7 @@ function App() {
     const initial = String(user.name || 'A').slice(0, 1);
     return html`<div class="shell">
         <aside class="sidebar">
-            <div class="brand"><span class="brand-mark">A</span><span><strong>Atrium</strong><em>${user.workspace || 'Workspace'}</em></span></div>
+            <div class="brand">${logoUrl ? html`<img class="brand-logo" src=${logoUrl} alt="" />` : brandIcon()}<span><strong>${company?.companyName || user.workspace || 'Company'}</strong></span></div>
             <div class="nav-scroll">
                 ${nav.map(([label, items]) => html`<section class="nav-group" key=${label}>
                     <div class="nav-label">${label}</div>
@@ -2833,7 +2839,7 @@ function App() {
                 ${screen === 'whatsapp' ? html`<${WhatsAppBoard} />` : null}
                 ${spec && spec.kind === 'sites' ? html`<${SitesBoard} key=${screen} start=${spec.start} />` : null}
                 ${spec && spec.kind === 'attendance' ? html`<${AttendanceBoard} key="attendance" user=${user} />` : null}
-                ${spec && spec.kind === 'company' ? html`<${CompanyBoard} onSaved=${async () => setUser(await call('/api/v1/me'))} />` : null}
+                ${spec && spec.kind === 'company' ? html`<${CompanyBoard} onSaved=${async () => { setUser(await call('/api/v1/me')); setCompany(await call('/api/v1/company')); }} />` : null}
                 ${spec && screen !== 'notifications' && screen !== 'whatsapp' && spec.kind !== 'sites' && spec.kind !== 'attendance' && spec.kind !== 'company' ? html`<${Resource} key=${screen} title=${title} lede=${spec.lede} spec=${spec} />` : null}
                 ${passwordOpen ? html`<${ChangePassword} onClose=${() => setPasswordOpen(false)} />` : null}
             </main>

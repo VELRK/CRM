@@ -245,19 +245,14 @@ class DeskApi extends BaseController
         }
 
         $owner = $this->companyOwner();
-        $plan = (string) ($tenant['plan_code'] ?? 'starter');
 
         return [
             'companyName'       => (string) ($tenant['name'] ?? ''),
             'companyAdminName'  => (string) ($owner['name'] ?? ''),
             'companyAdminEmail' => (string) ($owner['email'] ?? ''),
-            'companyPlan'       => $plan,
-            'maxUsers'          => AccessCatalog::USER_CAPS[$plan] ?? AccessCatalog::USER_CAPS['starter'],
-            'expiryDate'        => null,
             'phone'             => (string) ($tenant['phone'] ?? ''),
             'address'           => (string) ($tenant['address'] ?? ''),
             'logo'              => $this->logoPath() !== null,
-            'insertedDate'      => $tenant['created_at'] ?? null,
             'updatedDate'       => $tenant['updated_at'] ?? null,
         ];
     }
