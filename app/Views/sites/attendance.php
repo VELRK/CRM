@@ -105,6 +105,7 @@ $todayNum = (int) date('j');
         <input type="hidden" name="form" value="attendance">
         <input type="hidden" name="lat">
         <input type="hidden" name="lng">
+        <input type="hidden" name="accuracy">
         <header class="modal-head">
             <h2 data-modal-title>Mark attendance</h2>
             <button class="icon-button" type="button" data-close aria-label="Close"><?= icon('x') ?></button>
@@ -121,6 +122,16 @@ $todayNum = (int) date('j');
                 </label>
             <?php endif; ?>
             <label>Date <input type="date" name="work_date" value="<?= esc(date('Y-m-d')) ?>" required></label>
+            <?php if (! empty($locations)) : ?>
+                <label>Location
+                    <select name="location_id">
+                        <option value="">Leave or absence needs no location</option>
+                        <?php foreach ($locations as $place) : ?>
+                            <option value="<?= (int) $place['id'] ?>"><?= esc((string) $place['name']) ?><?= ! empty($place['category_name']) ? ' · ' . esc((string) $place['category_name']) : '' ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </label>
+            <?php endif; ?>
             <label>Status
                 <select name="status">
                     <option value="present">Present</option>
@@ -151,6 +162,7 @@ document.querySelector('#attendance-modal form')?.addEventListener('submit', fun
     navigator.geolocation.getCurrentPosition(function (position) {
         form.lat.value = position.coords.latitude;
         form.lng.value = position.coords.longitude;
+        if (form.accuracy) form.accuracy.value = position.coords.accuracy;
         form.submit();
     }, function () { form.submit(); }, { timeout: 4000 });
 });

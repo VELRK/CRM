@@ -86,6 +86,14 @@ $routes->group('api/v1', ['filter' => 'apiauth'], static function ($routes) {
     $routes->post('tasks/(:num)/done', 'Api\DeskApi::doneTask/$1');
     $routes->post('tasks/(:num)/reschedule', 'Api\DeskApi::rescheduleTask/$1');
 
+    $routes->get('attendance/categories', 'Api\DeskApi::attendanceCategories');
+    $routes->post('attendance/categories/(:num)', 'Api\DeskApi::saveAttendanceCategory/$1');
+    $routes->post('attendance/categories', 'Api\DeskApi::saveAttendanceCategory');
+    $routes->get('attendance/locations', 'Api\DeskApi::attendanceLocations');
+    $routes->post('attendance/locations/(:num)', 'Api\DeskApi::saveAttendanceLocation/$1');
+    $routes->post('attendance/locations', 'Api\DeskApi::saveAttendanceLocation');
+    $routes->get('attendance/places', 'Api\DeskApi::attendancePlaces');
+    $routes->get('attendance/sessions', 'Api\DeskApi::attendanceSessions');
     $routes->get('attendance', 'Api\DeskApi::attendance');
     $routes->post('attendance', 'Api\DeskApi::markAttendance');
 

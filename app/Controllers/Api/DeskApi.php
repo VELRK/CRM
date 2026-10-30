@@ -6,6 +6,7 @@ use App\Controllers\BaseController;
 use App\Libraries\AccessCatalog;
 use App\Libraries\ApiCatalog;
 use App\Libraries\ApiContext;
+use App\Libraries\AttendanceLocationService;
 use App\Libraries\DeskService;
 use App\Libraries\ReportFile;
 use App\Libraries\EstateService;
@@ -160,6 +161,7 @@ class DeskApi extends BaseController
                 'email'      => $adminEmail,
                 'updated_at' => $now,
             ]);
+            $this->estate->saveAttendanceArea($this->tenant(), $input);
 
             return $this->ok($this->companyRow());
         });
@@ -245,6 +247,7 @@ class DeskApi extends BaseController
         }
 
         $owner = $this->companyOwner();
+        $area = $this->estate->attendanceArea($this->tenant());
 
         return [
             'companyName'       => (string) ($tenant['name'] ?? ''),
@@ -254,6 +257,9 @@ class DeskApi extends BaseController
             'address'           => (string) ($tenant['address'] ?? ''),
             'logo'              => $this->logoPath() !== null,
             'updatedDate'       => $tenant['updated_at'] ?? null,
+            'attendanceLat'     => $area['lat'],
+            'attendanceLng'     => $area['lng'],
+            'attendanceKm'      => $area['km'] === '0' ? '' : $area['km'],
         ];
     }
 
@@ -463,7 +469,7 @@ class DeskApi extends BaseController
             return $denied;
         }
 
-        return $this->pageList($this->onlyTeamProjects($this->sites->projects($this->tenant()), 'id'));
+        return $this->pageList($this->places()->withProjectLocations($this->tenant(), $this->onlyTeamProjects($this->sites->projects($this->tenant()), 'id')));
     }
 
     public function saveProject(?int $id = null): ResponseInterface
@@ -477,7 +483,11 @@ class DeskApi extends BaseController
                 return $this->fail('That project is not on your team.', 404);
             }
 
-            return $this->ok(['id' => $this->sites->saveProject($this->tenant(), $id, $this->input())]);
+            $input = $this->input();
+            $projectId = $this->sites->saveProject($this->tenant(), $id, $input);
+            $this->places()->saveProjectLocation($this->tenant(), $projectId, $input);
+
+            return $this->ok(['id' => $projectId]);
         });
     }
 
@@ -509,6 +519,8 @@ class DeskApi extends BaseController
         if ($project === null) {
             return $this->fail('That project is not in this workspace.', 404);
         }
+
+        $project = $this->places()->withProjectLocations($this->tenant(), [$project])[0];
 
         if (! $this->projectAllowed($id)) {
             return $this->fail('That project is not on your team.', 404);
@@ -1107,6 +1119,87 @@ class DeskApi extends BaseController
         });
     }
 
+    public function attendanceCategories(): ResponseInterface
+    {
+        if ($denied = $this->guardAny(['attendance.view', 'attendance.mark', 'attendance.correct', 'projects.view'])) {
+            return $denied;
+        }
+
+        return $this->ok($this->places()->categories($this->tenant()));
+    }
+
+    public function saveAttendanceCategory(?int $id = null): ResponseInterface
+    {
+        if ($denied = $this->guard('attendance.correct')) {
+            return $denied;
+        }
+
+        return $this->run(function () use ($id) {
+            return $this->ok(['id' => $this->places()->saveCategory($this->tenant(), $id, $this->input())]);
+        });
+    }
+
+    public function attendanceLocations(): ResponseInterface
+    {
+        if ($denied = $this->guardAny(['attendance.view', 'attendance.mark', 'attendance.correct', 'projects.view'])) {
+            return $denied;
+        }
+
+        return $this->ok($this->places()->locations($this->tenant(), $this->allows('attendance.correct')));
+    }
+
+    public function saveAttendanceLocation(?int $id = null): ResponseInterface
+    {
+        if ($denied = $this->guard('attendance.correct')) {
+            return $denied;
+        }
+
+        return $this->run(function () use ($id) {
+            return $this->ok(['id' => $this->places()->saveLocation($this->tenant(), $id, $this->input())]);
+        });
+    }
+
+    public function attendancePlaces(): ResponseInterface
+    {
+        if ($denied = $this->guardAny(['attendance.view', 'attendance.mark', 'attendance.correct'])) {
+            return $denied;
+        }
+
+        $requested = (int) $this->request->getGet('user_id');
+        $userId = $this->user();
+
+        if ($requested > 0 && $requested !== $userId) {
+            if (! $this->allows('attendance.correct')) {
+                return $this->fail('Your role does not include that access.', 403);
+            }
+
+            $userId = $requested;
+        }
+
+        $lat = $this->request->getGet('lat');
+        $lng = $this->request->getGet('lng');
+
+        return $this->ok($this->places()->places(
+            $this->tenant(),
+            $userId,
+            is_string($lat) ? $lat : null,
+            is_string($lng) ? $lng : null,
+        ));
+    }
+
+    public function attendanceSessions(): ResponseInterface
+    {
+        if ($denied = $this->guard('attendance.view')) {
+            return $denied;
+        }
+
+        return $this->ok($this->teamRows($this->places()->sessions(
+            $this->tenant(),
+            trim((string) $this->request->getGet('month')),
+            trim((string) $this->request->getGet('date')),
+        ), ['user_id']));
+    }
+
     public function attendance(): ResponseInterface
     {
         if ($denied = $this->guard('attendance.view')) {
@@ -1130,7 +1223,9 @@ class DeskApi extends BaseController
         }
 
         return $this->run(function () use ($input, $target, $correcting) {
-            $this->estate->markAttendance($this->tenant(), $correcting ? $target : $this->user(), $input, $correcting, $this->user());
+            $userId = $correcting ? $target : $this->user();
+            $this->estate->markAttendance($this->tenant(), $userId, $input, $correcting, $this->user());
+            $this->desk->audit($this->tenant(), $this->user(), $this->plan(), $correcting ? 'attendance.correct' : 'attendance.mark', 'user', $userId, (string) ($input['status'] ?? ''));
 
             return $this->ok(['saved' => true]);
         });
@@ -1673,6 +1768,25 @@ class DeskApi extends BaseController
         }
 
         return $this->fail('Your role does not include that access.', 403);
+    }
+
+    /**
+     * @param list<string> $keys
+     */
+    private function guardAny(array $keys): ?ResponseInterface
+    {
+        foreach ($keys as $key) {
+            if ($this->allows($key)) {
+                return null;
+            }
+        }
+
+        return $this->fail('Your role does not include that access.', 403);
+    }
+
+    private function places(): AttendanceLocationService
+    {
+        return new AttendanceLocationService(db_connect());
     }
 
     private function allows(string $key): bool

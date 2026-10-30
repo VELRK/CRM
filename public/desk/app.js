@@ -1211,6 +1211,11 @@ function dayShift(value) {
 function ProjectForm({ project, onDone, onClose }) {
     const [company, setCompany] = useState(null);
     const logoUrl = useCompanyLogo(company?.logo ? company.updatedDate || 'logo' : '');
+    const [places, setPlaces] = useState([]);
+    const [categories, setCategories] = useState([]);
+    const [mode, setMode] = useState(project?.attendance_location_id ? 'existing' : 'none');
+    const [placeId, setPlaceId] = useState(project?.attendance_location_id ? String(project.attendance_location_id) : '');
+    const [spot, setSpot] = useState({ name: '', category_id: '', category_name: '', address: '', latitude: '', longitude: '', radius_metres: '', work_start: '', work_end: '', accuracy_metres: '' });
     const [form, setForm] = useState({
         name: project?.name || '',
         location: project?.location || '',
@@ -1225,16 +1230,37 @@ function ProjectForm({ project, onDone, onClose }) {
             setCompany(row);
             if (!project?.id && row?.address) setForm((current) => current.location ? current : { ...current, location: row.address });
         }).catch(() => {});
+        call('/api/v1/attendance/locations').then((rows) => setPlaces(Array.isArray(rows) ? rows : [])).catch(() => {});
+        call('/api/v1/attendance/categories').then((rows) => setCategories(Array.isArray(rows) ? rows : [])).catch(() => {});
     }, []);
     async function submit(event) {
         event.preventDefault();
         setError('');
         try {
+            const body = { ...form, total_plots: Number(form.total_plots || 0) };
+            if (mode === 'new') {
+                body.attendance_location = {
+                    name: spot.name || form.name,
+                    category_id: Number(spot.category_id || 0),
+                    category_name: spot.category_name || '',
+                    address: spot.address || form.location || '',
+                    latitude: spot.latitude,
+                    longitude: spot.longitude,
+                    radius_metres: Number(spot.radius_metres || 0),
+                    work_start: spot.work_start,
+                    work_end: spot.work_end,
+                    accuracy_metres: spot.accuracy_metres,
+                    status: 'active',
+                };
+            } else {
+                body.attendance_location_id = mode === 'existing' ? Number(placeId || 0) : 0;
+            }
             const path = project?.id ? '/api/v1/projects/' + project.id : '/api/v1/projects';
-            await call(path, { method: 'POST', body: { ...form, total_plots: Number(form.total_plots || 0) } });
+            await call(path, { method: 'POST', body });
             onDone();
         } catch (e) { setError(e.message); }
     }
+    const setSpotKey = (key) => (event) => setSpot({ ...spot, [key]: event.target.value });
     return html`<${FormCard} title=${project?.id ? 'Edit project' : 'Add project'} error=${error} onSubmit=${submit} onClose=${onClose}>
         ${companyMark(company, logoUrl)}
         ${field('Name', inputOf(form, 'name', setForm))}
@@ -1243,6 +1269,33 @@ function ProjectForm({ project, onDone, onClose }) {
         ${field('Type', inputOf(form, 'project_type', setForm))}
         ${field('Total plots', inputOf(form, 'total_plots', setForm, 'number'))}
         ${field('Launch date', inputOf(form, 'launch_on', setForm, 'date'))}
+        ${field('Attendance location', html`<select value=${mode === 'existing' ? placeId : mode} onChange=${(event) => {
+            const value = event.target.value;
+            if (value === 'none' || value === 'new') { setMode(value); setPlaceId(''); return; }
+            setMode('existing');
+            setPlaceId(value);
+        }}><option value="none">No attendance location</option><option value="new">Create a location</option>${places.filter((row) => row.status === 'active' || String(row.id) === placeId).map((row) => html`<option key=${row.id} value=${String(row.id)}>${row.name}${row.category_name ? ' · ' + row.category_name : ''}</option>`)}</select>`, true)}
+        ${mode === 'new' ? html`
+            ${project?.attendance_location_id ? html`<p class="muted span-2">This project already has a place. Saving updates that same location.</p>` : null}
+            ${field('Place name', html`<input value=${spot.name} placeholder=${form.name || 'Place name'} onInput=${setSpotKey('name')} />`)}
+            ${field('Category', html`<select value=${spot.category_id} onChange=${(event) => setSpot({ ...spot, category_id: event.target.value, category_name: '' })}><option value="">New category</option>${categories.filter((row) => row.status === 'active').map((row) => html`<option key=${row.id} value=${String(row.id)}>${row.name}</option>`)}</select>`)}
+            ${spot.category_id ? null : field('New category', html`<input value=${spot.category_name} onInput=${setSpotKey('category_name')} placeholder="Type a category" />`)}
+            ${field('Place address', html`<input value=${spot.address} onInput=${setSpotKey('address')} />`)}
+            ${field('Latitude', html`<input value=${spot.latitude} onInput=${setSpotKey('latitude')} />`)}
+            ${field('Longitude', html`<input value=${spot.longitude} onInput=${setSpotKey('longitude')} />`)}
+            ${field('Geofence (metres)', html`<input type="number" min="1" max="100000" step="1" value=${spot.radius_metres} onInput=${setSpotKey('radius_metres')} />`)}
+            ${field('Work start', html`<input type="time" value=${spot.work_start} onInput=${setSpotKey('work_start')} />`)}
+            ${field('Work end', html`<input type="time" value=${spot.work_end} onInput=${setSpotKey('work_end')} />`)}
+            ${field('GPS accuracy (metres)', html`<input type="number" min="0" max="5000" step="1" value=${spot.accuracy_metres} onInput=${setSpotKey('accuracy_metres')} placeholder="Empty skips this check" />`)}
+            <div class="span-2 row-actions"><button class="ghost" type="button" onClick=${async () => {
+                setError('');
+                try {
+                    const here = await readPlace();
+                    setSpot({ ...spot, latitude: String(here.lat), longitude: String(here.lng) });
+                } catch (e) { setError(e.message); }
+            }}>Use my current location</button></div>
+            <${MapPick} lat=${spot.latitude} lng=${spot.longitude} onPick=${(lat, lng) => setSpot({ ...spot, latitude: lat, longitude: lng })} />
+        ` : null}
     <//>`;
 }
 function SitesBoard({ start }) {
@@ -2531,6 +2584,19 @@ function Console() {
     </section>`;
 }
 
+function readPlace() {
+    return new Promise((resolve, reject) => {
+        if (!navigator.geolocation) {
+            reject(new Error('This browser cannot read your location.'));
+            return;
+        }
+        navigator.geolocation.getCurrentPosition(
+            (position) => resolve({ lat: Number(position.coords.latitude.toFixed(7)), lng: Number(position.coords.longitude.toFixed(7)), accuracy: position.coords.accuracy == null ? null : Math.round(position.coords.accuracy) }),
+            () => reject(new Error('Allow location access. Attendance is accepted only inside an assigned location.')),
+            { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 }
+        );
+    });
+}
 const ATTEND_LABEL = { present: 'Present', late: 'Late', leave: 'Leave', absent: 'Absent' };
 const ATTEND_MARK = { present: 'P', late: 'Lt', leave: 'L', absent: 'A' };
 const ATTEND_TONE = { present: 'ok', late: 'warn', leave: 'info', absent: 'stop' };
@@ -2546,7 +2612,7 @@ function CompanyBoard({ onSaved }) {
         setError('');
         setSaved('');
         try {
-            const data = await call('/api/v1/company', { method: 'POST', body: { companyName: form.companyName, companyAdminName: form.companyAdminName, companyAdminEmail: form.companyAdminEmail, phone: form.phone || '', address: form.address || '' } });
+            const data = await call('/api/v1/company', { method: 'POST', body: { companyName: form.companyName, companyAdminName: form.companyAdminName, companyAdminEmail: form.companyAdminEmail, phone: form.phone || '', address: form.address || '', attendanceLat: form.attendanceLat || '', attendanceLng: form.attendanceLng || '', attendanceKm: form.attendanceKm || '' } });
             setForm(data);
             setSaved('Settings saved.');
             if (onSaved) await onSaved();
@@ -2575,7 +2641,7 @@ function CompanyBoard({ onSaved }) {
     if (!form) return html`<p class="empty-line">${error || 'Opening settings…'}</p>`;
     return html`<form class="panel-card stack" onSubmit=${submit}>
         <h3>Basic settings</h3>
-        <p>Change the company name, email, phone, address, and logo. The email is also the owner sign-in. These details show when a site is created.</p>
+        <p>Change the company name, email, phone, address, and logo. The email is also the owner sign-in. These details show when a site is created. The kilometre area below is used only when this workspace has no attendance locations.</p>
         ${error ? html`<p class="error">${error}</p>` : null}
         ${saved ? html`<p class="ok-line">${saved}</p>` : null}
         <div class="company-strip">
@@ -2588,9 +2654,194 @@ function CompanyBoard({ onSaved }) {
             ${field('Phone', html`<input inputMode="numeric" value=${form.phone || ''} onInput=${set('phone')} />`)}
             ${field('Address', html`<input value=${form.address || ''} onInput=${set('address')} />`, true)}
             ${field('Contact name', html`<input value=${form.companyAdminName || ''} onInput=${set('companyAdminName')} required />`)}
+            ${field('Attendance latitude', html`<input value=${form.attendanceLat || ''} onInput=${set('attendanceLat')} placeholder="11.0168000" />`)}
+            ${field('Attendance longitude', html`<input value=${form.attendanceLng || ''} onInput=${set('attendanceLng')} placeholder="76.9558000" />`)}
+            ${field('Attendance area (km)', html`<input type="number" min="0" max="100" step="0.1" value=${form.attendanceKm || ''} onInput=${set('attendanceKm')} placeholder="Leave empty to allow any place" />`)}
         </div>
+        <div class="row-actions"><button class="ghost" type="button" onClick=${async () => {
+            setError('');
+            try {
+                const place = await readPlace();
+                setForm({ ...form, attendanceLat: String(place.lat), attendanceLng: String(place.lng) });
+            } catch (e) { setError(e.message); }
+        }}>Use my current location</button></div>
         <div class="row-actions"><button class="primary" type="submit">Save</button></div>
     </form>`;
+}
+const CHECK_WORD = { open: 'Checked in', done: 'Checked out', none: 'Not checked in' };
+function loadLeaflet() {
+    if (window.L) return Promise.resolve(window.L);
+    if (!window.__leaflet) {
+        window.__leaflet = new Promise((resolve, reject) => {
+            const css = document.createElement('link');
+            css.rel = 'stylesheet';
+            css.href = 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css';
+            document.head.appendChild(css);
+            const script = document.createElement('script');
+            script.src = 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js';
+            script.onload = () => {
+                const L = window.L;
+                delete L.Icon.Default.prototype._getIconUrl;
+                L.Icon.Default.mergeOptions({
+                    iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon-2x.png',
+                    iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon.png',
+                    shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png',
+                });
+                resolve(L);
+            };
+            script.onerror = () => reject(new Error('The map could not be loaded. Enter the latitude and longitude, or use current location.'));
+            document.head.appendChild(script);
+        });
+    }
+    return window.__leaflet;
+}
+function MapPick({ lat, lng, onPick }) {
+    const box = useRef(null);
+    const mapRef = useRef(null);
+    const markerRef = useRef(null);
+    const [mapError, setMapError] = useState('');
+    useEffect(() => {
+        let cancelled = false;
+        loadLeaflet().then((L) => {
+            if (cancelled || !box.current || mapRef.current) return;
+            const has = lat !== '' && lng !== '' && !Number.isNaN(Number(lat)) && !Number.isNaN(Number(lng));
+            const map = L.map(box.current).setView(has ? [Number(lat), Number(lng)] : [20, 0], has ? 16 : 2);
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap' }).addTo(map);
+            map.on('click', (event) => onPick(event.latlng.lat.toFixed(7), event.latlng.lng.toFixed(7)));
+            mapRef.current = map;
+            if (has) markerRef.current = L.marker([Number(lat), Number(lng)]).addTo(map);
+            setTimeout(() => map.invalidateSize(), 200);
+        }).catch((e) => { if (!cancelled) setMapError(e.message); });
+        return () => {
+            cancelled = true;
+            if (mapRef.current) { mapRef.current.remove(); mapRef.current = null; markerRef.current = null; }
+        };
+    }, []);
+    useEffect(() => {
+        const L = window.L;
+        const map = mapRef.current;
+        if (!L || !map) return;
+        const has = lat !== '' && lng !== '' && !Number.isNaN(Number(lat)) && !Number.isNaN(Number(lng));
+        if (!has) return;
+        const point = [Number(lat), Number(lng)];
+        if (markerRef.current) markerRef.current.setLatLng(point);
+        else markerRef.current = L.marker(point).addTo(map);
+        map.setView(point, Math.max(map.getZoom(), 16));
+    }, [lat, lng]);
+    return html`<div class="span-2"><div class="map-pick" ref=${box}></div>${mapError ? html`<p class="muted">${mapError}</p>` : html`<p class="muted">Click the map to set the point, or use current location.</p>`}</div>`;
+}
+function blankPlace() {
+    return { id: 0, name: '', category_id: '', category_name: '', address: '', latitude: '', longitude: '', radius_metres: '', work_start: '', work_end: '', accuracy_metres: '', status: 'active', entity_type: '', entity_id: '', user_ids: [] };
+}
+function LocationDesk({ people }) {
+    const [categories, setCategories] = useState([]);
+    const [places, setPlaces] = useState([]);
+    const [projects, setProjects] = useState([]);
+    const [categoryName, setCategoryName] = useState('');
+    const [editing, setEditing] = useState(null);
+    const [error, setError] = useState('');
+    function load() {
+        setError('');
+        call('/api/v1/attendance/categories').then((rows) => setCategories(Array.isArray(rows) ? rows : [])).catch((e) => setError(e.message));
+        call('/api/v1/attendance/locations').then((rows) => setPlaces(Array.isArray(rows) ? rows : [])).catch((e) => setError(e.message));
+        call('/api/v1/projects').then((rows) => setProjects(Array.isArray(rows) ? rows : [])).catch(() => {});
+    }
+    useEffect(() => { load(); }, []);
+    async function saveCategory(event) {
+        event.preventDefault();
+        setError('');
+        try {
+            await call('/api/v1/attendance/categories', { method: 'POST', body: { name: categoryName, status: 'active' } });
+            setCategoryName('');
+            load();
+        } catch (e) { setError(e.message); }
+    }
+    async function toggleCategory(row) {
+        setError('');
+        try {
+            await call('/api/v1/attendance/categories/' + row.id, { method: 'POST', body: { name: row.name, status: row.status === 'active' ? 'inactive' : 'active' } });
+            load();
+        } catch (e) { setError(e.message); }
+    }
+    return html`<section class="panel-card stack">
+        <h3>Attendance locations</h3>
+        <p class="lede">Add a category, then a place. Each place has its own point, radius in metres, working hours, and the people who may check in there.</p>
+        ${error ? html`<p class="error">${error}</p>` : null}
+        <form class="site-tools" onSubmit=${saveCategory}>
+            <label>Category<input value=${categoryName} onInput=${(event) => setCategoryName(event.target.value)} placeholder="Category name" required /></label>
+            <button class="primary" type="submit">Add category</button>
+        </form>
+        <div class="place-list">${categories.length === 0 ? html`<p class="empty-line">No categories yet.</p>` : categories.map((row) => html`<article key=${row.id} class="place-card"><strong>${row.name}</strong><span class=${'tag ' + (row.status === 'active' ? 'ok' : 'muted')}>${row.status === 'active' ? 'Active' : 'Inactive'}</span><button class="ghost" type="button" onClick=${() => toggleCategory(row)}>${row.status === 'active' ? 'Deactivate' : 'Activate'}</button></article>`)}</div>
+        <div class="row-actions"><button class="primary" type="button" onClick=${() => setEditing(blankPlace())}>Add location</button></div>
+        <div class="table-card"><table class="board-table"><thead><tr><th>Location</th><th>Category</th><th>Linked record</th><th>Radius</th><th>Hours</th><th>Status</th><th></th></tr></thead><tbody>
+            ${places.length === 0 ? html`<tr><td colSpan="7">No attendance locations yet.</td></tr>` : places.map((row) => html`<tr key=${row.id}>
+                <td>${row.name}</td>
+                <td>${row.category_name || '—'}</td>
+                <td>${row.entity_name || '—'}</td>
+                <td>${row.radius_metres} m</td>
+                <td>${row.work_start && row.work_end ? row.work_start + '–' + row.work_end : '—'}</td>
+                <td>${row.status === 'active' ? 'Active' : 'Inactive'}</td>
+                <td><button class="ghost" type="button" onClick=${() => setEditing({ ...blankPlace(), ...row, category_id: String(row.category_id || ''), entity_id: row.entity_type === 'project' && row.entity_id ? String(row.entity_id) : '', entity_type: row.entity_type || '', accuracy_metres: row.accuracy_metres == null ? '' : String(row.accuracy_metres), radius_metres: String(row.radius_metres || ''), user_ids: row.user_ids || [] })}>Edit</button></td>
+            </tr>`)}
+        </tbody></table></div>
+        ${editing ? html`<${LocationForm} place=${editing} categories=${categories} projects=${projects} people=${people} onDone=${() => { setEditing(null); load(); }} onClose=${() => setEditing(null)} />` : null}
+    </section>`;
+}
+function LocationForm({ place, categories, projects, people, onDone, onClose }) {
+    const [form, setForm] = useState(place);
+    const [error, setError] = useState('');
+    const set = (key) => (event) => setForm({ ...form, [key]: event.target.value });
+    async function submit(event) {
+        event.preventDefault();
+        setError('');
+        try {
+            const path = form.id ? '/api/v1/attendance/locations/' + form.id : '/api/v1/attendance/locations';
+            await call(path, { method: 'POST', body: {
+                name: form.name,
+                category_id: Number(form.category_id || 0),
+                category_name: form.category_name || '',
+                address: form.address || '',
+                latitude: form.latitude,
+                longitude: form.longitude,
+                radius_metres: Number(form.radius_metres || 0),
+                work_start: form.work_start || '',
+                work_end: form.work_end || '',
+                accuracy_metres: form.accuracy_metres,
+                status: form.status || 'active',
+                entity_type: form.entity_id ? 'project' : '',
+                entity_id: form.entity_id ? Number(form.entity_id) : 0,
+                user_ids: form.user_ids || [],
+            } });
+            onDone();
+        } catch (e) { setError(e.message); }
+    }
+    return html`<${FormCard} title=${form.id ? 'Edit location' : 'Add location'} error=${error} onSubmit=${submit} onClose=${onClose}>
+        ${field('Name', html`<input value=${form.name || ''} onInput=${set('name')} required />`)}
+        ${field('Category', html`<select value=${form.category_id || ''} onChange=${(event) => setForm({ ...form, category_id: event.target.value, category_name: '' })}><option value="">New category</option>${categories.filter((row) => row.status === 'active' || String(row.id) === String(form.category_id)).map((row) => html`<option key=${row.id} value=${String(row.id)}>${row.name}</option>`)}</select>`)}
+        ${form.category_id ? null : field('New category', html`<input value=${form.category_name || ''} onInput=${set('category_name')} placeholder="Type a category" />`)}
+        ${field('Address', html`<input value=${form.address || ''} onInput=${set('address')} />`, true)}
+        ${field('Latitude', html`<input value=${form.latitude || ''} onInput=${set('latitude')} />`)}
+        ${field('Longitude', html`<input value=${form.longitude || ''} onInput=${set('longitude')} />`)}
+        ${field('Geofence (metres)', html`<input type="number" min="1" max="100000" step="1" value=${form.radius_metres || ''} onInput=${set('radius_metres')} required />`)}
+        ${field('Work start', html`<input type="time" value=${form.work_start || ''} onInput=${set('work_start')} />`)}
+        ${field('Work end', html`<input type="time" value=${form.work_end || ''} onInput=${set('work_end')} />`)}
+        ${field('GPS accuracy (metres)', html`<input type="number" min="0" max="5000" step="1" value=${form.accuracy_metres || ''} onInput=${set('accuracy_metres')} placeholder="Empty skips this check" />`)}
+        ${field('Status', html`<select value=${form.status || 'active'} onChange=${set('status')}><option value="active">Active</option><option value="inactive">Inactive</option></select>`)}
+        ${field('Linked project', html`<select value=${form.entity_id || ''} onChange=${set('entity_id')}><option value="">None</option>${projects.map((row) => html`<option key=${row.id} value=${String(row.id)}>${row.name}</option>`)}</select>`, true)}
+        <div class="span-2 row-actions"><button class="ghost" type="button" onClick=${async () => {
+            setError('');
+            try {
+                const here = await readPlace();
+                setForm({ ...form, latitude: String(here.lat), longitude: String(here.lng) });
+            } catch (e) { setError(e.message); }
+        }}>Use my current location</button></div>
+        <${MapPick} lat=${form.latitude || ''} lng=${form.longitude || ''} onPick=${(lat, lng) => setForm({ ...form, latitude: lat, longitude: lng })} />
+        <div class="span-2"><span class="field">People who can check in here</span><div class="pick-list">${people.filter((person) => person.status !== 'inactive' && person.status !== 'relieved').map((person) => html`<label key=${person.user_id}><input type="checkbox" checked=${(form.user_ids || []).map(String).includes(String(person.user_id))} onChange=${() => {
+            const id = Number(person.user_id);
+            const ids = (form.user_ids || []).map(Number);
+            setForm({ ...form, user_ids: ids.includes(id) ? ids.filter((item) => item !== id) : [...ids, id] });
+        }} />${person.name}</label>`)}</div></div>
+    <//>`;
 }
 function AttendanceBoard({ user }) {
     const now = new Date();
@@ -2601,6 +2852,11 @@ function AttendanceBoard({ user }) {
     const [people, setPeople] = useState([]);
     const [error, setError] = useState('');
     const [marking, setMarking] = useState(null);
+    const [teams, setTeams] = useState([]);
+    const [teamId, setTeamId] = useState('');
+    const [area, setArea] = useState(null);
+    const [sessions, setSessions] = useState([]);
+    const [showPlaces, setShowPlaces] = useState(false);
     const [permissions, setPermissions] = useState(user.permissions || []);
     useEffect(() => { call('/api/v1/me').then((me) => setPermissions(me.permissions || [])).catch(() => {}); }, []);
     const canCorrect = permissions.includes('attendance.correct');
@@ -2617,9 +2873,12 @@ function AttendanceBoard({ user }) {
             call('/api/v1/attendance?month=' + encodeURIComponent(todayKey)).then((data) => setTodayRows(Array.isArray(data) ? data : [])).catch(() => {});
         }
         call('/api/v1/staff').then((data) => setPeople(Array.isArray(data) ? data : [])).catch(() => {});
+        call('/api/v1/teams').then((data) => setTeams(Array.isArray(data) ? data : [])).catch(() => {});
+        call('/api/v1/company').then((data) => setArea(data)).catch(() => {});
+        call('/api/v1/attendance/sessions?date=' + today).then((data) => setSessions(Array.isArray(data) ? data : [])).catch(() => {});
     }
     useEffect(() => { load(); }, [year, month]);
-    const staff = people.filter((person) => person.status !== 'inactive' && person.status !== 'relieved' && String(person.attendance_applicable) !== '0');
+    const staff = people.filter((person) => person.status !== 'inactive' && person.status !== 'relieved' && String(person.attendance_applicable) !== '0' && (!teamId || String(person.team_id || '') === String(teamId)));
     const days = new Date(year, month, 0).getDate();
     const byPerson = {};
     rows.forEach((row) => {
@@ -2637,16 +2896,27 @@ function AttendanceBoard({ user }) {
         if (!canMark) { setError('This sign-in cannot mark attendance.'); return; }
         if (!canCorrect && String(person.user_id) !== String(user.id)) { setError('You can mark only your own attendance.'); return; }
         const existing = (byPerson[String(person.user_id)] || {})[date] || (date === today ? todayMap[String(person.user_id)] : null);
-        setMarking({ person, date, status: existing?.status || 'present', action: existing?.check_in && !existing?.check_out ? 'out' : 'in', note: existing?.note || '' });
+        setMarking({ person, date, status: existing?.status || 'present', action: existing?.check_in && !existing?.check_out ? 'out' : 'in', note: existing?.note || '', self: String(person.user_id) === String(user.id) });
     }
     return html`<div class="sites attend">
         ${error ? html`<p class="error">${error}</p>` : null}
         <div class="site-tools">
             <label>Year<select value=${String(year)} onChange=${(event) => setYear(Number(event.target.value))}>${years.map((value) => html`<option key=${value} value=${String(value)}>${value}</option>`)}</select></label>
             <label>Month<select value=${String(month)} onChange=${(event) => setMonth(Number(event.target.value))}>${months.map((label, index) => html`<option key=${label} value=${String(index + 1)}>${label}</option>`)}</select></label>
+            <label>Team<select value=${teamId} onChange=${(event) => setTeamId(event.target.value)}><option value="">All teams</option>${teams.map((team) => html`<option key=${team.id} value=${String(team.id)}>${team.name}</option>`)}</select></label>
             <button class="ghost" type="button" onClick=${() => { setYear(now.getFullYear()); setMonth(now.getMonth() + 1); }}>Today</button>
+            <button class="ghost" type="button" onClick=${() => {
+                const teamName = Object.fromEntries(teams.map((team) => [String(team.id), team.name]));
+                const allowed = new Set(staff.map((person) => String(person.user_id)));
+                downloadSheet('Attendance ' + months[month - 1] + ' ' + year, ['User', 'Team', 'Date', 'Status', 'Check in', 'Check out', 'Sessions'], rows.filter((row) => allowed.has(String(row.user_id))).map((row) => {
+                    const person = staff.find((item) => String(item.user_id) === String(row.user_id));
+                    return [row.user_name || person?.name || '', teamName[String(person?.team_id || '')] || '', String(row.work_date || '').slice(0, 10), ATTEND_LABEL[row.status] || row.status || '', row.check_in ? clock(row.check_in) : '', row.check_out ? clock(row.check_out) : '', row.session_count || 0];
+                }));
+            }}>Download</button>
+            ${canCorrect ? html`<button class="ghost" type="button" onClick=${() => setShowPlaces(!showPlaces)}>${showPlaces ? 'Hide locations' : 'Locations'}</button>` : null}
             ${canMark ? html`<button class="primary" type="button" onClick=${() => { const person = staff.find((row) => String(row.user_id) === String(user.id)) || (canCorrect ? staff[0] : null); if (person) openMark(person, today); else setError('No staff row is available to mark.'); }}>Mark attendance</button>` : null}
         </div>
+        ${showPlaces ? html`<${LocationDesk} people=${people} />` : null}
         <div class="attend-layout">
             <section class="panel-card">
                 <h3>${months[month - 1]} ${year}</h3>
@@ -2677,24 +2947,45 @@ function AttendanceBoard({ user }) {
                             <strong>${person.name}</strong>
                             <em>${person.role_name || ''}</em>
                             ${mark ? html`<span class=${'tag ' + (ATTEND_TONE[mark.status] || 'muted')}>${ATTEND_LABEL[mark.status] || mark.status}</span><small>${mark.check_in ? clock(mark.check_in) : '—'}${mark.check_out ? ' – ' + clock(mark.check_out) : ''}</small>` : html`<span class="tag muted">Not marked</span>`}
+                            ${sessions.filter((row) => String(row.user_id) === String(person.user_id)).map((row) => html`<small key=${row.id}>${row.location_name || 'Location'}${row.category_name ? ' · ' + row.category_name : ''}${row.entity_name ? ' · ' + row.entity_name : ''} · ${CHECK_WORD[row.check_status] || row.check_status}</small>`)}
                         </div>
                         ${canMark && (canCorrect || String(person.user_id) === String(user.id)) ? html`<button class="ghost" type="button" onClick=${() => openMark(person, today)}>${mark?.check_in && !mark?.check_out ? 'Out' : 'Mark'}</button>` : null}
                     </article>`;
                 })}
             </aside>
         </div>
-        ${marking ? html`<${AttendForm} key=${marking.person.user_id + marking.date} marking=${marking} onDone=${() => { setMarking(null); load(); }} onClose=${() => setMarking(null)} />` : null}
+        ${marking ? html`<${AttendForm} key=${marking.person.user_id + marking.date} marking=${marking} area=${area} onDone=${() => { setMarking(null); load(); }} onClose=${() => setMarking(null)} />` : null}
     </div>`;
 }
-function AttendForm({ marking, onDone, onClose }) {
-    const [form, setForm] = useState({ status: marking.status, action: marking.action, note: marking.note });
+function AttendForm({ marking, area, onDone, onClose }) {
+    const [form, setForm] = useState({ status: marking.status, action: marking.action, note: marking.note, location_id: '' });
+    const [places, setPlaces] = useState([]);
     const [error, setError] = useState('');
     const set = (key) => (event) => setForm({ ...form, [key]: event.target.value });
+    useEffect(() => {
+        const path = marking.self ? '/api/v1/attendance/places' : '/api/v1/attendance/locations';
+        call(path).then((rows) => {
+            const list = (Array.isArray(rows) ? rows : []).filter((row) => marking.self || row.status === 'active');
+            setPlaces(list);
+            const open = list.find((row) => row.check_status === 'open');
+            if (open) setForm((current) => ({ ...current, location_id: String(open.id), action: 'out' }));
+            if (!marking.self || list.length === 0) return;
+            readPlace().then((here) => call('/api/v1/attendance/places?lat=' + here.lat + '&lng=' + here.lng)).then((near) => {
+                if (Array.isArray(near)) setPlaces(near);
+            }).catch(() => {});
+        }).catch((e) => setError(e.message));
+    }, []);
+    const needsGps = marking.self && (form.status === 'present' || form.status === 'late') && (places.length > 0 || Number(area?.attendanceKm) > 0);
     async function submit(event) {
         event.preventDefault();
         setError('');
         try {
-            await call('/api/v1/attendance', { method: 'POST', body: { user_id: marking.person.user_id, work_date: marking.date, status: form.status, action: form.action, note: form.note } });
+            if (marking.self && places.length > 0 && (form.status === 'present' || form.status === 'late') && !form.location_id) {
+                setError('Choose an attendance location.');
+                return;
+            }
+            const place = needsGps ? await readPlace() : {};
+            await call('/api/v1/attendance', { method: 'POST', body: { user_id: marking.person.user_id, work_date: marking.date, status: form.status, action: form.action, note: form.note, location_id: form.location_id ? Number(form.location_id) : undefined, lat: place.lat, lng: place.lng, accuracy: place.accuracy } });
             onDone();
         } catch (e) { setError(e.message); }
     }
@@ -2702,8 +2993,15 @@ function AttendForm({ marking, onDone, onClose }) {
         ${xrow('User', html`<input value=${marking.person.name} readOnly />`)}
         ${xrow('Date', html`<input type="date" value=${marking.date} readOnly />`)}
         ${xrow('Status', html`<select value=${form.status} onChange=${set('status')}>${Object.entries(ATTEND_LABEL).map(([value, label]) => html`<option key=${value} value=${value}>${label}</option>`)}</select>`, true)}
+        ${places.length > 0 && (form.status === 'present' || form.status === 'late') ? html`<div class="place-list">${places.map((row) => html`<button key=${row.id} type="button" class=${'place-card' + (String(form.location_id) === String(row.id) ? ' on' : '')} onClick=${() => setForm({ ...form, location_id: String(row.id), action: row.check_status === 'open' ? 'out' : form.action })}>
+            <strong>${row.name}</strong>
+            <span>${row.category_name || 'Location'}${row.entity_name ? ' · ' + row.entity_name : ''}</span>
+            <em>${row.distance_metres == null ? '' : row.distance_metres + ' m away'}${row.check_status ? (row.distance_metres == null ? '' : ' · ') + (CHECK_WORD[row.check_status] || '') : ''}</em>
+        </button>`)}</div>` : null}
         ${xrow('Action', html`<select value=${form.action} onChange=${set('action')}><option value="in">Check in</option><option value="out">Check out</option></select>`)}
         ${xrow('Note', html`<input value=${form.note} onInput=${set('note')} />`)}
+        ${needsGps && places.length > 0 ? html`<p class="muted">Check-in and check-out use this device’s location and must be inside the selected place.</p>` : null}
+        ${needsGps && places.length === 0 ? html`<p class="muted">Check-in and check-out use this device’s location and must be inside ${area.attendanceKm} km of the company.</p>` : null}
     `, true, 'Save');
 }
 function SendWhatsApp({ lead, onDone, onClose }) {

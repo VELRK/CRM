@@ -336,6 +336,13 @@ button.heat-cell { height: 22px; border-radius: 4px; border: 0; padding: 0; widt
 .attend-person { display: grid; grid-template-columns: 36px 1fr auto; gap: 10px; align-items: center; padding: 10px 0; border-bottom: 1px solid #eef1f6; }
 .attend-person strong, .attend-person em, .attend-person small { display: block; }
 .attend-person em, .attend-person small { color: #6b7280; font-style: normal; font-size: 13px; }
+.map-pick { height: 220px; border: 1px solid #c9d5cc; border-radius: 12px; }
+.map-pick img { max-width: none; }
+.place-list { display: grid; gap: 8px; }
+.place-card { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; text-align: left; border: 1px solid #c9d5cc; border-radius: 12px; padding: 10px 12px; background: #fff; }
+.place-card.on { border-color: #1F6B4A; background: #E6F2EB; }
+.place-card strong, .place-card span, .place-card em { display: block; }
+.place-card em { color: #6b7280; font-style: normal; font-size: 12px; }
 
 h1 { font-size: 20px; font-weight: 600; line-height: 1.3; }
 h2 { font-size: 16px; font-weight: 600; line-height: 1.35; }

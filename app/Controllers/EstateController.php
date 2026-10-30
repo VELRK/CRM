@@ -142,6 +142,8 @@ class EstateController extends PortalController
             }
         }
 
+        $canCorrect = $this->can('attendance.correct');
+
         return $this->page('sites/attendance', [
             'active'      => 'attendance',
             'year'        => (int) $year,
@@ -150,6 +152,7 @@ class EstateController extends PortalController
             'rows'        => $rows,
             'staff'       => $this->sites->staff($this->tenantId),
             'todayByUser' => $todayByUser,
+            'locations'   => (new \App\Libraries\AttendanceLocationService(db_connect()))->markChoices($this->tenantId, $this->userId, $canCorrect),
             'open'        => old('form') === 'attendance',
         ]);
     }
@@ -171,12 +174,14 @@ class EstateController extends PortalController
 
         try {
             $this->estate->markAttendance($this->tenantId, $userId, [
-                'work_date' => $this->request->getPost('work_date'),
-                'status'    => $this->request->getPost('status'),
-                'note'      => $this->request->getPost('note'),
-                'action'    => $this->request->getPost('action'),
-                'lat'       => $this->request->getPost('lat'),
-                'lng'       => $this->request->getPost('lng'),
+                'work_date'   => $this->request->getPost('work_date'),
+                'status'      => $this->request->getPost('status'),
+                'note'        => $this->request->getPost('note'),
+                'action'      => $this->request->getPost('action'),
+                'location_id' => $this->request->getPost('location_id'),
+                'lat'         => $this->request->getPost('lat'),
+                'lng'         => $this->request->getPost('lng'),
+                'accuracy'    => $this->request->getPost('accuracy'),
             ], $correcting, $this->userId);
             $this->desk->audit($this->tenantId, $this->userId, (string) session()->get('plan_code'), 'attendance.mark', 'user', $userId, (string) $this->request->getPost('status'));
         } catch (\Throwable $e) {

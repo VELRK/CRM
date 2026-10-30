@@ -420,7 +420,7 @@ class EstateService
             return [];
         }
 
-        return $this->db->table('attendance a')
+        $rows = $this->db->table('attendance a')
             ->select('a.*, u.name AS user_name')
             ->join('users u', 'u.id = a.user_id', 'left')
             ->where('a.tenant_id', $tenantId)
@@ -428,6 +428,8 @@ class EstateService
             ->orderBy('a.work_date', 'DESC')
             ->get()
             ->getResultArray();
+
+        return (new AttendanceLocationService($this->db))->attachSessionCounts($tenantId, $month, $rows);
     }
 
     /**
@@ -440,6 +442,14 @@ class EstateService
 
         if (! preg_match('/^\d{4}-\d{2}-\d{2}$/', $date) || ! in_array($status, ['present', 'leave', 'absent', 'late'], true)) {
             throw new RuntimeException('Choose a date and an attendance status.');
+        }
+
+        if ((new AttendanceLocationService($this->db))->handleMark($tenantId, $userId, $input, $correcting, $actorId, $date, $status)) {
+            return;
+        }
+
+        if (! $correcting && in_array($status, ['present', 'late'], true)) {
+            $this->requireAttendanceArea($tenantId, $input['lat'] ?? null, $input['lng'] ?? null);
         }
 
         $now = date('Y-m-d H:i:s');
@@ -742,6 +752,84 @@ class EstateService
         unset($row);
 
         return $rows;
+    }
+
+    /**
+     * @return array{lat: string, lng: string, km: string}
+     */
+    public function attendanceArea(int $tenantId): array
+    {
+        return [
+            'lat' => (string) ($this->setting($tenantId, 'attendance_lat') ?? ''),
+            'lng' => (string) ($this->setting($tenantId, 'attendance_lng') ?? ''),
+            'km'  => (string) ($this->setting($tenantId, 'attendance_km') ?? ''),
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $input
+     */
+    public function saveAttendanceArea(int $tenantId, array $input): void
+    {
+        $kmRaw = trim((string) ($input['attendanceKm'] ?? $input['attendance_km'] ?? ''));
+        $latRaw = trim((string) ($input['attendanceLat'] ?? $input['attendance_lat'] ?? ''));
+        $lngRaw = trim((string) ($input['attendanceLng'] ?? $input['attendance_lng'] ?? ''));
+
+        if ($kmRaw !== '' && ! is_numeric($kmRaw)) {
+            throw new RuntimeException('Enter the attendance area in kilometres, up to 100.');
+        }
+
+        if ($kmRaw === '' || (float) $kmRaw <= 0) {
+            $this->saveSetting($tenantId, 'attendance_km', '0');
+            $this->saveSetting($tenantId, 'attendance_lat', '');
+            $this->saveSetting($tenantId, 'attendance_lng', '');
+
+            return;
+        }
+
+        if ((float) $kmRaw > 100) {
+            throw new RuntimeException('Enter the attendance area in kilometres, up to 100.');
+        }
+
+        if (! is_numeric($latRaw) || (float) $latRaw < -90 || (float) $latRaw > 90 || ! is_numeric($lngRaw) || (float) $lngRaw < -180 || (float) $lngRaw > 180) {
+            throw new RuntimeException('Enter the company latitude and longitude for the attendance area.');
+        }
+
+        $this->saveSetting($tenantId, 'attendance_km', number_format((float) $kmRaw, 2, '.', ''));
+        $this->saveSetting($tenantId, 'attendance_lat', number_format((float) $latRaw, 7, '.', ''));
+        $this->saveSetting($tenantId, 'attendance_lng', number_format((float) $lngRaw, 7, '.', ''));
+    }
+
+    private function requireAttendanceArea(int $tenantId, mixed $lat, mixed $lng): void
+    {
+        $area = $this->attendanceArea($tenantId);
+        $km = (float) $area['km'];
+
+        if ($km <= 0 || ! is_numeric($area['lat']) || ! is_numeric($area['lng'])) {
+            return;
+        }
+
+        $hereLat = $this->coord($lat);
+        $hereLng = $this->coord($lng);
+
+        if ($hereLat === null || $hereLng === null) {
+            throw new RuntimeException('Allow location access. Attendance is accepted only inside the company area.');
+        }
+
+        if (! $this->withinKilometres((float) $area['lat'], (float) $area['lng'], (float) $hereLat, (float) $hereLng, $km)) {
+            throw new RuntimeException('You are outside the attendance area. Check-in and check-out are allowed only within ' . rtrim(rtrim(number_format($km, 2, '.', ''), '0'), '.') . ' km.');
+        }
+    }
+
+    private function withinKilometres(float $lat1, float $lng1, float $lat2, float $lng2, float $km): bool
+    {
+        $earth = 6371.0;
+        $dLat = deg2rad($lat2 - $lat1);
+        $dLng = deg2rad($lng2 - $lng1);
+        $a = sin($dLat / 2) ** 2 + cos(deg2rad($lat1)) * cos(deg2rad($lat2)) * sin($dLng / 2) ** 2;
+        $distance = $earth * (2 * atan2(sqrt($a), sqrt(1 - $a)));
+
+        return $distance <= $km;
     }
 
     public function setting(int $tenantId, string $key): ?string
