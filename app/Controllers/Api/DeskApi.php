@@ -358,7 +358,7 @@ class DeskApi extends BaseController
             return $denied;
         }
 
-        return $this->pageList($this->sites->staff($this->tenant()));
+        return $this->pageList($this->teamRows($this->sites->staff($this->tenant()), ['user_id']));
     }
 
     public function saveStaff(int $id): ResponseInterface
@@ -394,6 +394,12 @@ class DeskApi extends BaseController
         }
 
         $teams = $this->estate->teams($this->tenant());
+        $scope = $this->viewScope();
+
+        if (($scope['level'] ?? '') === 'team' && is_array($scope['team_ids'])) {
+            $allowedTeams = array_flip($scope['team_ids']);
+            $teams = array_values(array_filter($teams, static fn (array $team): bool => isset($allowedTeams[(int) $team['id']])));
+        }
         $names = [];
 
         foreach (db_connect()->table('users u')->select('u.id, u.name')->join('tenant_users tu', 'tu.user_id = u.id')->where('tu.tenant_id', $this->tenant())->get()->getResultArray() as $person) {
@@ -666,7 +672,7 @@ class DeskApi extends BaseController
             return $denied;
         }
 
-        return $this->pageList($this->sites->leads($this->tenant(), trim((string) $this->request->getGet('q'))));
+        return $this->pageList($this->teamRows($this->sites->leads($this->tenant(), trim((string) $this->request->getGet('q'))), ['owner_id']));
     }
 
     public function lead(int $id): ResponseInterface
@@ -909,7 +915,7 @@ class DeskApi extends BaseController
             return true;
         }));
 
-        return $this->pageList($rows);
+        return $this->pageList($this->teamRows($rows, ['assigned_to', 'user_id']));
     }
 
     public function saveFollowup(): ResponseInterface
@@ -960,7 +966,7 @@ class DeskApi extends BaseController
             return $denied;
         }
 
-        return $this->pageList($this->sites->visits($this->tenant()));
+        return $this->pageList($this->teamRows($this->sites->visits($this->tenant()), ['staff_id']));
     }
 
     public function saveVisit(): ResponseInterface
@@ -1024,7 +1030,7 @@ class DeskApi extends BaseController
             return $denied;
         }
 
-        return $this->pageList($this->sites->tasks($this->tenant()));
+        return $this->pageList($this->teamRows($this->sites->tasks($this->tenant()), ['assigned_to']));
     }
 
     public function saveTask(): ResponseInterface
@@ -1075,7 +1081,7 @@ class DeskApi extends BaseController
 
         $month = trim((string) $this->request->getGet('month'));
 
-        return $this->ok($this->estate->attendance($this->tenant(), $month !== '' ? $month : date('Y-m')));
+        return $this->ok($this->teamRows($this->estate->attendance($this->tenant(), $month !== '' ? $month : date('Y-m')), ['user_id']));
     }
 
     public function markAttendance(): ResponseInterface
@@ -1102,7 +1108,7 @@ class DeskApi extends BaseController
             return $denied;
         }
 
-        return $this->ok($this->estate->incentives($this->tenant()));
+        return $this->ok($this->teamRows($this->estate->incentives($this->tenant()), ['user_id']));
     }
 
     public function incentiveStatus(int $id): ResponseInterface
@@ -1496,6 +1502,48 @@ class DeskApi extends BaseController
         $this->desk->audit($this->tenant(), $this->user(), $this->plan(), 'export', 'file', null, $filename);
 
         return $this->response->setHeader('Content-Type', 'text/csv')->setHeader('Content-Disposition', 'attachment; filename="' . $filename . '"')->setBody($body);
+    }
+
+    /**
+     * @return array{level: string, label: string, user_ids: ?list<int>, team_ids: ?list<int>}
+     */
+    private function viewScope(): array
+    {
+        $actor = $this->actor();
+
+        return $this->estate->reportScope($this->tenant(), $this->user(), (string) $actor['role_name'], (bool) $actor['is_owner']);
+    }
+
+    /**
+     * A Team Head only sees people on the teams they lead. Company roles see everyone.
+     *
+     * @param list<array<string, mixed>> $rows
+     * @param list<string> $keys
+     * @return list<array<string, mixed>>
+     */
+    private function teamRows(array $rows, array $keys): array
+    {
+        $scope = $this->viewScope();
+
+        if (($scope['level'] ?? '') !== 'team') {
+            return $rows;
+        }
+
+        $ids = $scope['user_ids'] ?? [];
+
+        $allowed = array_flip($ids);
+
+        return array_values(array_filter($rows, static function (array $row) use ($allowed, $keys): bool {
+            foreach ($keys as $key) {
+                $id = (int) ($row[$key] ?? 0);
+
+                if ($id > 0 && isset($allowed[$id])) {
+                    return true;
+                }
+            }
+
+            return false;
+        }));
     }
 
     private function guard(?string $permission): ?ResponseInterface
