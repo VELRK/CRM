@@ -12,6 +12,8 @@ if (! function_exists('icon')) {
         $svg = (string) file_get_contents($path);
         $svg = preg_replace('/\s(width|height)="[^"]*"/', '', $svg) ?? $svg;
 
-        return str_replace('<svg', '<svg class="icon" aria-hidden="true"', $svg);
+        $safe = preg_replace('/[^a-z0-9-]/', '', $name) ?: 'mark';
+
+        return str_replace('<svg', '<svg class="icon icon-' . $safe . '" aria-hidden="true"', $svg);
     }
 }

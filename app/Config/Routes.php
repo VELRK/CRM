@@ -101,6 +101,7 @@ $routes->group('api/v1', ['filter' => 'apiauth'], static function ($routes) {
     $routes->post('incentives/rule', 'Api\DeskApi::incentiveRule');
     $routes->post('incentives/(:num)', 'Api\DeskApi::incentiveStatus/$1');
 
+    $routes->get('reports/attendance', 'Api\DeskApi::reportAttendance');
     $routes->get('reports/excel', 'Api\DeskApi::exportExcel');
     $routes->get('reports/pdf', 'Api\DeskApi::exportPdf');
     $routes->get('reports', 'Api\DeskApi::reports');

@@ -1193,11 +1193,13 @@ class DeskApi extends BaseController
             return $denied;
         }
 
-        return $this->ok($this->teamRows($this->places()->sessions(
-            $this->tenant(),
-            trim((string) $this->request->getGet('month')),
-            trim((string) $this->request->getGet('date')),
-        ), ['user_id']));
+        $window = $this->attendanceWindow(false);
+
+        if ($window instanceof ResponseInterface) {
+            return $window;
+        }
+
+        return $this->ok($this->teamRows($this->places()->sessions($this->tenant(), $window[0], $window[1]), ['user_id']));
     }
 
     public function attendance(): ResponseInterface
@@ -1270,6 +1272,21 @@ class DeskApi extends BaseController
         $this->estate->saveSetting($this->tenant(), 'incentive_percent', (string) $percent);
 
         return $this->ok(['percent' => $percent]);
+    }
+
+    public function reportAttendance(): ResponseInterface
+    {
+        if ($denied = $this->guardAny(['reports.view', 'attendance.view'])) {
+            return $denied;
+        }
+
+        $window = $this->attendanceWindow(true);
+
+        if ($window instanceof ResponseInterface) {
+            return $window;
+        }
+
+        return $this->ok($this->teamRows($this->places()->sessions($this->tenant(), $window[0], $window[1]), ['user_id']));
     }
 
     public function reports(): ResponseInterface
@@ -1787,6 +1804,29 @@ class DeskApi extends BaseController
     private function places(): AttendanceLocationService
     {
         return new AttendanceLocationService(db_connect());
+    }
+
+    /**
+     * @return array{0: string, 1: string}|ResponseInterface
+     */
+    private function attendanceWindow(bool $monthByDefault): array|ResponseInterface
+    {
+        $month = trim((string) $this->request->getGet('month'));
+        $date = trim((string) $this->request->getGet('date'));
+
+        if ($month !== '' && ! preg_match('/^\d{4}-\d{2}$/', $month)) {
+            return $this->fail('Use a month like 2026-10.', 422);
+        }
+
+        if ($date !== '' && ! preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+            return $this->fail('Use a date like 2026-10-30.', 422);
+        }
+
+        if ($monthByDefault && $month === '' && $date === '') {
+            $month = date('Y-m');
+        }
+
+        return [$month, $date];
     }
 
     private function allows(string $key): bool

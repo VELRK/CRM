@@ -345,13 +345,45 @@ class AttendanceLocationService
         $rows = $builder->orderBy('s.id', 'DESC')->get()->getResultArray();
         $projects = $this->projectNames($tenantId);
 
-        foreach ($rows as &$row) {
-            $row['entity_name'] = (string) ($row['entity_type'] ?? '') === 'project' ? ($projects[(int) ($row['entity_id'] ?? 0)] ?? null) : null;
-            $row['check_status'] = empty($row['check_out']) ? 'open' : 'done';
-        }
-        unset($row);
+        return array_map(fn (array $row): array => $this->presentSession($row, $projects), $rows);
+    }
 
-        return $rows;
+    /**
+     * @param array<string, mixed> $row
+     * @param array<int, string> $projects
+     * @return array<string, mixed>
+     */
+    private function presentSession(array $row, array $projects): array
+    {
+        $checkedOut = ! empty($row['check_out']);
+        $entityType = (string) ($row['entity_type'] ?? '');
+        $entityId = (int) ($row['entity_id'] ?? 0);
+        $place = ($row['location_name'] ?? '') !== '' ? (string) $row['location_name'] : null;
+
+        return [
+            'id'                 => (int) $row['id'],
+            'user_id'            => (int) $row['user_id'],
+            'user_name'          => $row['user_name'] ?? null,
+            'work_date'          => substr((string) $row['work_date'], 0, 10),
+            'status'             => $row['status'],
+            'check_in'           => $row['check_in'],
+            'check_out'          => $checkedOut ? $row['check_out'] : null,
+            'check_status'       => $checkedOut ? 'done' : 'open',
+            'location_id'        => (int) $row['location_id'],
+            'location_name'      => $place,
+            'category_name'      => ($row['category_name'] ?? '') !== '' ? $row['category_name'] : null,
+            'entity_type'        => $entityType !== '' ? $entityType : null,
+            'entity_id'          => $entityId > 0 ? $entityId : null,
+            'entity_name'        => $entityType === 'project' ? ($projects[$entityId] ?? null) : null,
+            'check_in_place'     => $place,
+            'check_out_place'    => $checkedOut ? $place : null,
+            'check_in_lat'       => $row['check_in_lat'],
+            'check_in_lng'       => $row['check_in_lng'],
+            'check_in_accuracy'  => $row['check_in_accuracy'],
+            'check_out_lat'      => $checkedOut ? $row['check_out_lat'] : null,
+            'check_out_lng'      => $checkedOut ? $row['check_out_lng'] : null,
+            'check_out_accuracy' => $checkedOut ? $row['check_out_accuracy'] : null,
+        ];
     }
 
     /**

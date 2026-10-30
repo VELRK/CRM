@@ -82,6 +82,14 @@ function useCompanyLogo(stamp) {
 function brandIcon() {
     return html`<span class="brand-mark" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 20V9l8-5 8 5v11"/><path d="M9 20v-6h6v6"/></svg></span>`;
 }
+function actIcon(kind, label, onClick, wide) {
+    const mark = {
+        edit: html`<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/>`,
+        delete: html`<path d="M4 7h16"/><path d="M9 7V5h6v2"/><path d="M7 7l1 13h8l1-13"/>`,
+        update: html`<path d="M21 12a9 9 0 1 1-2.6-6.3"/><path d="M21 3v6h-6"/>`,
+    };
+    return html`<button class=${'act act-' + kind + (wide ? ' act-wide' : '')} type="button" title=${label} aria-label=${label} onClick=${onClick}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${mark[kind]}</svg>${wide ? html`<span>${label}</span>` : null}</button>`;
+}
 function companyMark(company, logoUrl) {
     if (!company) return null;
     return html`<div class="company-strip">
@@ -287,8 +295,8 @@ function Grid({ title, note, columns, rows, query = '', filters = false, onRow, 
                     <td class="check"><input type="checkbox" checked=${!!selected[item.key]} aria-label="Select row" onClick=${(event) => event.stopPropagation()} onChange=${(event) => mark(item.key, event)} /></td>
                     ${columns.map((column) => html`<td key=${column.key}>${column.text ? column.text(item.row) : cell(column, item.row)}</td>`)}
                     ${onEdit || onDelete ? html`<td class="row-actions" onClick=${(event) => event.stopPropagation()}>
-                        ${onEdit ? html`<button class="ghost" type="button" onClick=${() => onEdit(item.row)}>Edit</button>` : null}
-                        ${onDelete ? html`<button class="ghost" type="button" onClick=${() => onDelete(item.row)}>Delete</button>` : null}
+                        ${onEdit ? actIcon('edit', 'Edit', () => onEdit(item.row)) : null}
+                        ${onDelete ? actIcon('delete', 'Delete', () => onDelete(item.row)) : null}
                     </td>` : null}
                 </tr>`)}
             </tbody>
@@ -679,7 +687,7 @@ function RoleForm({ role, onDone, onClose }) {
 }
 function Person({ name }) {
     if (!name) return '—';
-    const colors = ['#e85d4c', '#3cbfa0', '#e0a23a', '#1F6B4A', '#299cdb', '#8b6cc1'];
+    const colors = ['#E11D48', '#059669', '#F59E0B', '#0E8A4A', '#2563EB', '#7C3AED'];
     const color = colors[(name.charCodeAt(0) || 0) % colors.length];
     return html`<span class="who"><i style=${{ background: color }}>${initials(name)}</i><span>${name}</span></span>`;
 }
@@ -913,8 +921,8 @@ function Board({ kind, title, rows, onReload, onRow, onOpen, onEdit, onDelete, a
                         <td>${prettyDate(row.updated_at)}</td>
                         <td>${prettyDate(row.created_at)}</td>
                         ${onEdit || onDelete ? html`<td class="row-actions" onClick=${(event) => event.stopPropagation()}>
-                            ${onEdit ? html`<button class="ghost" type="button" onClick=${() => onEdit(row)}>Edit</button>` : null}
-                            ${onDelete ? html`<button class="ghost" type="button" onClick=${() => onDelete(row)}>Delete</button>` : null}
+                            ${onEdit ? actIcon('edit', 'Edit', () => onEdit(row)) : null}
+                            ${onDelete ? actIcon('delete', 'Delete', () => onDelete(row)) : null}
                         </td>` : null}` : null}
                     ${kind === 'calls' ? html`
                         <td>${row.lead_name || '—'}</td>
@@ -1075,7 +1083,7 @@ function LeadPage({ leadId, onBack }) {
                     <p>Assigned to <b>${owner}</b> (${lead.assigned_type || 'USER'})</p>
                 </div>
                 <button type="button" class="ghost" onClick=${() => setEditor('whatsapp')}>Send WhatsApp</button>
-                <button type="button" class="icon-plain" aria-label="Edit lead" onClick=${() => setEditor('lead')}>
+                <button type="button" class="act act-edit" aria-label="Edit lead" title="Edit" onClick=${() => setEditor('lead')}>
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/></svg>
                 </button>
             </header>
@@ -1086,7 +1094,7 @@ function LeadPage({ leadId, onBack }) {
                     ${fact('Email', lead.email ? html`<a href=${'mailto:' + lead.email}>${lead.email}</a>` : '—')}
                     ${fact('Phone', lead.phone_number || lead.phone)}
                     ${fact('Mobile', lead.alternate_phone_number || lead.phone_secondary)}
-                    ${fact('Lead stage', html`<b class="stage-edit">${lead.lead_stage || '—'}</b><button type="button" class="icon-plain" aria-label="Edit stage" onClick=${() => { setStage(lead.lead_stage || 'New'); setStageOpen(true); }}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/></svg></button>`)}
+                    ${fact('Lead stage', html`<b class="stage-edit">${lead.lead_stage || '—'}</b>${actIcon('update', 'Update stage', () => { setStage(lead.lead_stage || 'New'); setStageOpen(true); })}`)}
                     ${fact('Assigned by', lead.assigned_by_name ? html`<${Person} name=${lead.assigned_by_name} />` : '—')}
                 </section>
                 <button type="button" class="details-toggle" onClick=${() => setDetails(!details)}>${details ? 'Hide Details' : 'View Details'} <span>${details ? '▴' : '▾'}</span></button>
@@ -1137,7 +1145,7 @@ function LeadPage({ leadId, onBack }) {
                 <div class="card-head"><h3>Notes <em class="count-badge">${notes.length}</em></h3>
                     <select value=${noteSort} onChange=${(event) => setNoteSort(event.target.value)}><option value="new">Newest</option><option value="old">Oldest</option></select>
                 </div>
-                ${shownNotes.length === 0 ? html`<p class="empty-line">No notes yet</p>` : shownNotes.map((row) => html`<article class="note" key=${row.id}><header><strong>${row.note_heading}</strong><button type="button" onClick=${() => setNoteConfirm(row)}>Delete</button></header><p>${row.note_content}</p><small>${row.user_name || 'Staff'} · ${prettyWhen(row.created_at)}</small></article>`)}
+                ${shownNotes.length === 0 ? html`<p class="empty-line">No notes yet</p>` : shownNotes.map((row) => html`<article class="note" key=${row.id}><header><strong>${row.note_heading}</strong>${actIcon('delete', 'Delete', () => setNoteConfirm(row))}</header><p>${row.note_content}</p><small>${row.user_name || 'Staff'} · ${prettyWhen(row.created_at)}</small></article>`)}
                 ${noteConfirm ? confirmDelete(noteConfirm.note_heading || 'this note', error, removeNote, () => { setNoteConfirm(null); setError(''); }) : null}
                 <form class="note-box" onSubmit=${saveNote}>
                     <input placeholder="Note title" value=${note.noteHeading} onInput=${(event) => setNote({ ...note, noteHeading: event.target.value })} />
@@ -1357,7 +1365,7 @@ function SitesBoard({ start }) {
         if (row.registered_on || row.status === 'registered') item.done += 1;
     });
     const tabs = [['dashboard', 'Dashboard'], ['available', 'Available plots'], ['booking', 'Booking'], ['follow', 'Registration follow-up'], ['done', 'Registration completed'], ['teams', 'Team-wise reports'], ['inventory', 'Plot inventory']];
-    const tones = [['available', '#0ab39c'], ['advance', '#f7b84b'], ['booked', '#1F6B4A'], ['sold', '#143D2C'], ['owner_use', '#64748b'], ['future', '#299cdb']];
+    const tones = [['available', '#059669'], ['advance', '#F59E0B'], ['booked', '#2563EB'], ['sold', '#0A5C32'], ['owner_use', '#7C3AED'], ['future', '#0891B2']];
     function stack(source) {
         const total = Math.max(1, source.length);
         return html`<div class="stack-bar">${tones.map(([key, color]) => {
@@ -1390,9 +1398,9 @@ function SitesBoard({ start }) {
         <div class="site-tools">
             <label>Project<select value=${projectId} onChange=${(event) => setProjectId(event.target.value)}><option value="">All projects</option>${projects.map((project) => html`<option key=${project.id} value=${String(project.id)}>${project.name}</option>`)}</select></label>
             <button class="primary" type="button" onClick=${() => setProjectForm({})}>Add project</button>
-            ${selected ? html`<button class="ghost" type="button" onClick=${() => setProjectForm(selected)}>Edit project</button>` : null}
-            ${selected ? html`<button class="ghost" type="button" onClick=${() => setConfirm({ kind: 'project', row: selected })}>Delete project</button>` : null}
-            <button class="ghost" type="button" onClick=${load}>Refresh</button>
+            ${selected ? actIcon('edit', 'Edit project', () => setProjectForm(selected), true) : null}
+            ${selected ? actIcon('delete', 'Delete project', () => setConfirm({ kind: 'project', row: selected }), true) : null}
+            ${actIcon('update', 'Refresh', load, true)}
             ${tab !== 'dashboard' ? html`<input class="site-search" placeholder="Search project, plot, customer" value=${text} onInput=${(event) => setText(event.target.value)} />` : null}
         </div>
         <div class="site-tabs">
@@ -1480,11 +1488,11 @@ function PlotTable({ rows, mode, onEdit, onDelete }) {
             <td>${row.phase || row.block || '—'}</td>
             <td>${row.plot_no || '—'}</td>
             <td>${money(row.commission_minor)}</td>
-            ${mode === 'available' ? html`<td>${plotTag(row.status)}</td><td>${regCell(row)}</td>${onEdit ? html`<td><button class="ghost" type="button" onClick=${() => onEdit(row)}>Book</button></td>` : null}` : null}
-            ${mode === 'booking' ? html`<td>${row.customer_name || '—'}</td><td>${row.customer_phone || '—'}</td><td>${row.associate_name || '—'}</td><td>${row.head_name || '—'}</td><td>${plotTag(row.status)}</td><td>${prettyDate(row.booking_on)}</td><td>${money(row.advance_minor)}</td><td>${prettyDate(row.advance_deadline)}</td><td>${deadlineCell(row)}</td><td>${money(row.booking_amount_minor)}</td><td>${money(row.balance_minor)}</td><td><button class="ghost" type="button" onClick=${() => onEdit(row)}>Edit</button></td>` : null}
-            ${mode === 'follow' ? html`<td>${row.customer_name || '—'}</td><td>${row.customer_phone || '—'}</td><td>${row.associate_name || '—'}</td><td>${row.head_name || '—'}</td><td>${money(row.advance_minor)}</td><td>${prettyDate(row.advance_received_on)}</td><td>${prettyDate(row.registration_deadline)}</td><td>${leftCell(row)}</td><td>${plotTag(row.status)}</td><td>${regCell(row)}</td><td>${prettyDate(row.expected_registration_on)}</td><td>${row.remarks || '—'}</td>${onEdit ? html`<td><button class="ghost" type="button" onClick=${() => onEdit(row)}>Edit</button></td>` : null}` : null}
-            ${mode === 'done' ? html`<td>${row.customer_name || '—'}</td><td>${row.customer_phone || '—'}</td><td>${row.associate_name || '—'}</td><td>${row.head_name || '—'}</td><td>${plotTag(row.status)}</td><td>${regCell(row)}</td><td>${prettyDate(row.expected_registration_on)}</td><td>${prettyDate(row.registered_on)}</td><td>${row.remarks || '—'}</td>${onEdit ? html`<td><button class="ghost" type="button" onClick=${() => onEdit(row)}>Edit</button></td>` : null}` : null}
-            ${mode === 'inventory' ? html`<td>${row.facing || '—'}</td><td>${row.area_sqft || '—'}</td><td>${plotTag(row.status)}</td><td>${row.customer_name || '—'}</td><td>${row.associate_name || '—'}</td><td>${row.head_name || '—'}</td><td>${regCell(row)}</td><td>${prettyDate(row.expected_registration_on)}</td><td class="row-actions"><button class="ghost" type="button" onClick=${() => onEdit(row)}>Edit</button>${onDelete ? html`<button class="ghost" type="button" onClick=${() => onDelete(row)}>Delete</button>` : null}</td>` : null}
+            ${mode === 'available' ? html`<td>${plotTag(row.status)}</td><td>${regCell(row)}</td>${onEdit ? html`<td class="row-actions">${actIcon('update', 'Book', () => onEdit(row), true)}</td>` : null}` : null}
+            ${mode === 'booking' ? html`<td>${row.customer_name || '—'}</td><td>${row.customer_phone || '—'}</td><td>${row.associate_name || '—'}</td><td>${row.head_name || '—'}</td><td>${plotTag(row.status)}</td><td>${prettyDate(row.booking_on)}</td><td>${money(row.advance_minor)}</td><td>${prettyDate(row.advance_deadline)}</td><td>${deadlineCell(row)}</td><td>${money(row.booking_amount_minor)}</td><td>${money(row.balance_minor)}</td><td class="row-actions">${actIcon('edit', 'Edit', () => onEdit(row))}</td>` : null}
+            ${mode === 'follow' ? html`<td>${row.customer_name || '—'}</td><td>${row.customer_phone || '—'}</td><td>${row.associate_name || '—'}</td><td>${row.head_name || '—'}</td><td>${money(row.advance_minor)}</td><td>${prettyDate(row.advance_received_on)}</td><td>${prettyDate(row.registration_deadline)}</td><td>${leftCell(row)}</td><td>${plotTag(row.status)}</td><td>${regCell(row)}</td><td>${prettyDate(row.expected_registration_on)}</td><td>${row.remarks || '—'}</td>${onEdit ? html`<td class="row-actions">${actIcon('update', 'Update', () => onEdit(row))}</td>` : null}` : null}
+            ${mode === 'done' ? html`<td>${row.customer_name || '—'}</td><td>${row.customer_phone || '—'}</td><td>${row.associate_name || '—'}</td><td>${row.head_name || '—'}</td><td>${plotTag(row.status)}</td><td>${regCell(row)}</td><td>${prettyDate(row.expected_registration_on)}</td><td>${prettyDate(row.registered_on)}</td><td>${row.remarks || '—'}</td>${onEdit ? html`<td class="row-actions">${actIcon('update', 'Update', () => onEdit(row))}</td>` : null}` : null}
+            ${mode === 'inventory' ? html`<td>${row.facing || '—'}</td><td>${row.area_sqft || '—'}</td><td>${plotTag(row.status)}</td><td>${row.customer_name || '—'}</td><td>${row.associate_name || '—'}</td><td>${row.head_name || '—'}</td><td>${regCell(row)}</td><td>${prettyDate(row.expected_registration_on)}</td><td class="row-actions">${actIcon('edit', 'Edit', () => onEdit(row))}${onDelete ? actIcon('delete', 'Delete', () => onDelete(row)) : null}</td>` : null}
         </tr>`)}
     </tbody></table></div>`;
 }
@@ -1829,7 +1837,7 @@ function Heatmap({ visits, followups }) {
                 const day = dayKey(date);
                 const count = counts[day + '-' + hour] || 0;
                 const tone = count === 0 ? 0 : 0.16 + (count / max) * 0.84;
-                return html`<button type="button" key=${day + hour} class="heat-cell" title=${count + ' booked'} style=${{ background: count ? 'rgba(31, 107, 74, ' + tone.toFixed(2) + ')' : '#f3f6f9' }} onClick=${() => setPick({ day, hour, label: names[date.getDay()] + ' ' + date.getDate() + ' · ' + hourLabel(hour) })}></button>`;
+                return html`<button type="button" key=${day + hour} class="heat-cell" title=${count + ' booked'} style=${{ background: count ? 'rgba(14, 138, 74, ' + Math.max(0.45, tone).toFixed(2) + ')' : '#E0F2FE' }} onClick=${() => setPick({ day, hour, label: names[date.getDay()] + ' ' + date.getDate() + ' · ' + hourLabel(hour) })}></button>`;
             })}
         </div>`)}
     </div>
@@ -2038,7 +2046,7 @@ function Home({ onOpen }) {
     </section>`;
 }
 
-const chartColors = ['#1F6B4A', '#0ab39c', '#f7b84b', '#f06548', '#299cdb', '#878a99'];
+const chartColors = ['#0E8A4A', '#2563EB', '#F59E0B', '#E11D48', '#7C3AED', '#0891B2'];
 
 function piePath(cx, cy, radius, start, sweep) {
     if (sweep >= 359.9) return 'M ' + cx + ' ' + (cy - radius) + ' A ' + radius + ' ' + radius + ' 0 1 1 ' + (cx - 0.01) + ' ' + (cy - radius) + ' Z';
@@ -2260,22 +2268,36 @@ function reportView(id, rows) {
         };
     }
     if (id === 'attendance') {
+        const placeText = (row, kind) => {
+            const name = kind === 'out' ? row.check_out_place : row.check_in_place;
+            const lat = kind === 'out' ? row.check_out_lat : row.check_in_lat;
+            const lng = kind === 'out' ? row.check_out_lng : row.check_in_lng;
+            if (kind === 'out' && !row.check_out) return '';
+            if (name && lat && lng) return name + ' (' + lat + ', ' + lng + ')';
+            if (name) return name;
+            if (lat && lng) return lat + ', ' + lng;
+            return '';
+        };
         return {
             title: 'Attendance',
-            note: 'The user column is the person’s name for the selected month.',
+            note: 'Each row is one check-in. The place is where that check-in and check-out were recorded.',
             columns: [
                 personCol('User', (row) => row.user_name),
                 plainCol('Date', (row) => prettyDate(row.work_date)),
                 plainCol('Status', (row) => ATTEND_LABEL[row.status] || titleWord(row.status)),
                 plainCol('Check in', (row) => row.check_in ? clock(row.check_in) : ''),
+                plainCol('Check-in place', (row) => placeText(row, 'in')),
                 plainCol('Check out', (row) => row.check_out ? clock(row.check_out) : ''),
+                plainCol('Check-out place', (row) => placeText(row, 'out')),
+                plainCol('Project', (row) => row.entity_name),
             ],
             fields: [
                 { key: 'month', label: 'Month', kind: 'month' },
                 select('user', 'User', (row) => row.user_name),
+                select('place', 'Place', (row) => row.location_name || row.check_in_place),
                 { key: 'status', label: 'Status', kind: 'select', options: ['Present', 'Late', 'Leave', 'Absent'] },
             ],
-            test: (row, filters) => (!filters.user || row.user_name === filters.user) && (!filters.status || (ATTEND_LABEL[row.status] || titleWord(row.status)) === filters.status) && includesText(row, filters.q, [(item) => item.user_name]),
+            test: (row, filters) => (!filters.user || row.user_name === filters.user) && (!filters.place || (row.location_name || row.check_in_place) === filters.place) && (!filters.status || (ATTEND_LABEL[row.status] || titleWord(row.status)) === filters.status) && includesText(row, filters.q, [(item) => item.user_name, (item) => item.location_name, (item) => item.entity_name, (item) => placeText(item, 'in'), (item) => placeText(item, 'out')]),
         };
     }
     if (id === 'incentives') {
@@ -2344,7 +2366,7 @@ async function loadReport(id, month) {
         const rows = await call('/api/v1/plots');
         return (Array.isArray(rows) ? rows : []).filter((row) => ['advance', 'booked', 'sold', 'registered'].includes(String(row.status || '')));
     }
-    return call('/api/v1/attendance?month=' + encodeURIComponent(month));
+    return call('/api/v1/reports/attendance?month=' + encodeURIComponent(month));
 }
 function Reports() {
     const [tab, setTab] = useState('staff');
@@ -2771,7 +2793,7 @@ function LocationDesk() {
             <label>Category<input value=${categoryName} onInput=${(event) => setCategoryName(event.target.value)} placeholder="Category name" required /></label>
             <button class="primary" type="submit">Add category</button>
         </form>
-        <div class="place-list">${categories.length === 0 ? html`<p class="empty-line">No categories yet.</p>` : categories.map((row) => html`<article key=${row.id} class="place-card"><strong>${row.name}</strong><span class=${'tag ' + (row.status === 'active' ? 'ok' : 'muted')}>${row.status === 'active' ? 'Active' : 'Inactive'}</span><button class="ghost" type="button" onClick=${() => toggleCategory(row)}>${row.status === 'active' ? 'Deactivate' : 'Activate'}</button></article>`)}</div>
+        <div class="place-list">${categories.length === 0 ? html`<p class="empty-line">No categories yet.</p>` : categories.map((row) => html`<article key=${row.id} class="place-card"><strong>${row.name}</strong><span class=${'tag ' + (row.status === 'active' ? 'ok' : 'muted')}>${row.status === 'active' ? 'Active' : 'Inactive'}</span>${actIcon('update', row.status === 'active' ? 'Deactivate' : 'Activate', () => toggleCategory(row))}</article>`)}</div>
         <div class="row-actions"><button class="primary" type="button" onClick=${() => setEditing(blankPlace())}>Add location</button></div>
         <div class="table-card"><table class="board-table"><thead><tr><th>Location</th><th>Category</th><th>Linked record</th><th>Radius</th><th>Hours</th><th>Status</th><th></th></tr></thead><tbody>
             ${places.length === 0 ? html`<tr><td colSpan="7">No attendance locations yet.</td></tr>` : places.map((row) => html`<tr key=${row.id}>
@@ -2781,7 +2803,7 @@ function LocationDesk() {
                 <td>${row.radius_metres} m</td>
                 <td>${row.work_start && row.work_end ? row.work_start + '–' + row.work_end : '—'}</td>
                 <td>${row.status === 'active' ? 'Active' : 'Inactive'}</td>
-                <td><button class="ghost" type="button" onClick=${() => setEditing({ ...blankPlace(), ...row, category_id: String(row.category_id || ''), entity_id: row.entity_type === 'project' && row.entity_id ? String(row.entity_id) : '', entity_type: row.entity_type || '', accuracy_metres: row.accuracy_metres == null ? '' : String(row.accuracy_metres), radius_metres: String(row.radius_metres || ''), user_ids: row.user_ids || [] })}>Edit</button></td>
+                <td class="row-actions">${actIcon('edit', 'Edit', () => setEditing({ ...blankPlace(), ...row, category_id: String(row.category_id || ''), entity_id: row.entity_type === 'project' && row.entity_id ? String(row.entity_id) : '', entity_type: row.entity_type || '', accuracy_metres: row.accuracy_metres == null ? '' : String(row.accuracy_metres), radius_metres: String(row.radius_metres || ''), user_ids: row.user_ids || [] }))}</td>
             </tr>`)}
         </tbody></table></div>
         ${editing ? html`<${LocationForm} place=${editing} categories=${categories} projects=${projects} onDone=${() => { setEditing(null); load(); }} onClose=${() => setEditing(null)} />` : null}
