@@ -16,7 +16,7 @@ const nav = [
     ['People', [['Staff', 'staff'], ['Roles', 'roles'], ['Teams', 'teams']]],
     ['Sites', [['Projects', 'projects']]],
     ['Sales', [['Leads', 'leads'], ['Follow-ups', 'followups'], ['Visits', 'visits'], ['Tasks', 'tasks']]],
-    ['Office', [['Attendance', 'attendance'], ['Locations', 'locations'], ['Location categories', 'location-categories'], ['Incentives', 'incentives']]],
+    ['Office', [['Attendance', 'attendance'], ['Locations', 'locations'], ['Incentives', 'incentives']]],
     ['Insight', [['Activity', 'activity'], ['Notifications', 'notifications'], ['WhatsApp', 'whatsapp'], ['API console', 'api']]],
 ];
 const modules = nav.flatMap((group) => group[1]);
@@ -35,14 +35,27 @@ const lists = {
     tasks: { path: '/api/v1/tasks', kind: 'tasks', lede: '', columns: [], actions: ['task'] },
     attendance: { path: '/api/v1/attendance', kind: 'attendance', lede: '', columns: [] },
     locations: { path: '/api/v1/attendance/locations', kind: 'locations', lede: '', columns: [] },
-    'location-categories': { path: '/api/v1/attendance/categories', kind: 'location-categories', lede: '', columns: [] },
     incentives: { path: '/api/v1/incentives', lede: 'Commission rows and what is still pending.', columns: [col('User', 'user_name'), col('Project', 'project_name'), col('Plot', 'plot_no'), col('Status', 'status'), col('Amount', 'amount_minor')] },
     activity: { path: '/api/v1/activity', lede: 'What changed in this workspace.', columns: [col('When', 'created_at'), col('Person', 'user_name'), col('Action', 'action'), col('Record', 'subject_type'), col('Id', 'subject_id'), col('Detail', 'detail')] },
     notifications: { path: '/api/v1/notifications', lede: 'Messages for this sign-in.', columns: [col('Title', 'title'), col('Message', 'body'), col('Read', 'read_at')] },
     whatsapp: { path: '/api/v1/whatsapp/templates', lede: 'Message templates stored for this workspace.', columns: [col('Name', 'name'), col('Language', 'language'), col('Message', 'body')], actions: ['template'] },
 };
 
+const pendingWrites = new Map();
 async function call(path, options = {}) {
+    const method = String(options.method || 'GET').toUpperCase();
+    const key = method === 'GET' ? '' : method + '\n' + path + '\n' + JSON.stringify(options.body ?? null);
+    if (key && pendingWrites.has(key)) return pendingWrites.get(key);
+    const run = send(path, options);
+    if (key) {
+        pendingWrites.set(key, run);
+        run.finally(() => {
+            if (pendingWrites.get(key) === run) pendingWrites.delete(key);
+        });
+    }
+    return run;
+}
+async function send(path, options = {}) {
     const headers = { Accept: 'application/json' };
     const token = localStorage.getItem(tokenKey);
     if (token) headers.Authorization = 'Bearer ' + token;
@@ -61,6 +74,23 @@ async function call(path, options = {}) {
         throw new Error(payload.error || ('Request failed (' + response.status + ')'));
     }
     return payload.data !== undefined ? payload.data : payload;
+}
+function useSubmitLock(onSubmit) {
+    const lock = useRef(false);
+    const [busy, setBusy] = useState(false);
+    async function submit(event) {
+        event.preventDefault();
+        if (lock.current) return;
+        lock.current = true;
+        setBusy(true);
+        try {
+            await onSubmit(event);
+        } finally {
+            lock.current = false;
+            setBusy(false);
+        }
+    }
+    return [busy, submit];
 }
 function useCompanyLogo(stamp) {
     const [url, setUrl] = useState('');
@@ -318,46 +348,55 @@ function selectOf(form, key, setForm, options) {
     </select>`;
 }
 function FormCard({ title, error, onSubmit, onClose, children }) {
+    const [busy, submit] = useSubmitLock(onSubmit);
     return html`<div class="modal-back" onClick=${onClose}>
-        <form class="form-card modal-card" onClick=${(event) => event.stopPropagation()} onSubmit=${onSubmit}>
+        <form class="form-card modal-card" onClick=${(event) => event.stopPropagation()} onSubmit=${submit}>
             <h2>${title}</h2>
             <div class="form-grid">${children}</div>
             ${error ? html`<p class="error">${error}</p>` : null}
             <div class="row-actions">
-                <button class="primary" type="submit">Save</button>
+                <button class="primary" type="submit" disabled=${busy}>${busy ? 'Saving…' : 'Save'}</button>
+                <button class="ghost" type="button" onClick=${onClose}>Cancel</button>
+            </div>
+        </form>
+    </div>`;
+}
+function ConfirmDelete({ label, error, onYes, onClose }) {
+    const [busy, submit] = useSubmitLock(onYes);
+    return html`<div class="modal-back" onClick=${onClose}>
+        <form class="form-card modal-card confirm-card" onClick=${(event) => event.stopPropagation()} onSubmit=${submit}>
+            <h2>Delete ${label}?</h2>
+            <p class="lede">This removes the record from the list.</p>
+            ${error ? html`<p class="error">${error}</p>` : null}
+            <div class="row-actions">
+                <button class="danger" type="submit" disabled=${busy}>${busy ? 'Deleting…' : 'Delete'}</button>
                 <button class="ghost" type="button" onClick=${onClose}>Cancel</button>
             </div>
         </form>
     </div>`;
 }
 function confirmDelete(label, error, onYes, onClose) {
-    return html`<div class="modal-back" onClick=${onClose}>
-        <form class="form-card modal-card confirm-card" onClick=${(event) => event.stopPropagation()} onSubmit=${onYes}>
-            <h2>Delete ${label}?</h2>
-            <p class="lede">This removes the record from the list.</p>
-            ${error ? html`<p class="error">${error}</p>` : null}
-            <div class="row-actions">
-                <button class="danger" type="submit">Delete</button>
-                <button class="ghost" type="button" onClick=${onClose}>Cancel</button>
-            </div>
-        </form>
-    </div>`;
+    return html`<${ConfirmDelete} label=${label} error=${error} onYes=${onYes} onClose=${onClose} />`;
 }
 function xrow(label, control, required, top) {
     return html`<label class=${top ? 'xcrm-row top' : 'xcrm-row'}><span class=${required ? 'req' : ''}>${label}</span>${control}</label>`;
 }
-function sheet(title, error, onSubmit, onClose, children, narrow, action) {
+function Sheet({ title, error, onSubmit, onClose, narrow, action, children }) {
+    const [busy, submit] = useSubmitLock(onSubmit);
     return html`<div class="modal-back" onClick=${onClose}>
-        <form class=${narrow ? 'xcrm narrow' : 'xcrm'} onClick=${(event) => event.stopPropagation()} onSubmit=${onSubmit}>
+        <form class=${narrow ? 'xcrm narrow' : 'xcrm'} onClick=${(event) => event.stopPropagation()} onSubmit=${submit}>
             <h2>${title}</h2>
             ${children}
             ${error ? html`<p class="error">${error}</p>` : null}
             <div class="xcrm-actions">
                 <button class="ghost" type="button" onClick=${onClose}>Cancel</button>
-                <button class="primary" type="submit">${action || 'Save'}</button>
+                <button class="primary" type="submit" disabled=${busy}>${busy ? 'Saving…' : (action || 'Save')}</button>
             </div>
         </form>
     </div>`;
+}
+function sheet(title, error, onSubmit, onClose, children, narrow, action) {
+    return html`<${Sheet} title=${title} error=${error} onSubmit=${onSubmit} onClose=${onClose} narrow=${narrow} action=${action}>${children}<//>`;
 }
 function digits(value) {
     return String(value || '').replace(/\D+/g, '');
@@ -672,8 +711,9 @@ function RoleForm({ role, onDone, onClose }) {
             onDone();
         } catch (e) { setError(e.message); }
     }
+    const [busy, lockedSubmit] = useSubmitLock(submit);
     return html`<div class="modal-back" onClick=${onClose}>
-    <form class="form-card modal-card" onClick=${(event) => event.stopPropagation()} onSubmit=${submit}>
+    <form class="form-card modal-card" onClick=${(event) => event.stopPropagation()} onSubmit=${lockedSubmit}>
         <h2>${role?.id ? 'Allocate access' : 'New role'}</h2>
         ${role?.id ? null : field('Role name', html`<input value=${name} onInput=${(e) => setName(e.target.value)} />`)}
         ${Object.entries(groups).map(([label, items]) => html`<div class="access-group span-2" key=${label}>
@@ -682,7 +722,7 @@ function RoleForm({ role, onDone, onClose }) {
         </div>`)}
         ${error ? html`<p class="error">${error}</p>` : null}
         <div class="row-actions">
-            <button class="primary" type="submit">Save</button>
+            <button class="primary" type="submit" disabled=${busy}>${busy ? 'Saving…' : 'Save'}</button>
             <button class="ghost" type="button" onClick=${onClose}>Cancel</button>
         </div>
     </form></div>`;
@@ -847,6 +887,7 @@ function Board({ kind, title, rows, onReload, onRow, onOpen, onEdit, onDelete, a
             onReload();
         } catch (e) { setError(e.message); }
     }
+    const [savingMove, saveMove] = useSubmitLock(reschedule);
     function actions(row) {
         const closed = ['COMPLETED', 'CANCELLED'].includes(String(row.display_status || '').toUpperCase());
         if (closed) return null;
@@ -893,13 +934,13 @@ function Board({ kind, title, rows, onReload, onRow, onOpen, onEdit, onDelete, a
         />` : null}
         ${error ? html`<p class="error">${error}</p>` : null}
         ${move ? html`<div class="modal-back" onClick=${() => setMove(null)}>
-            <form class="form-card modal-card confirm-card" onClick=${(event) => event.stopPropagation()} onSubmit=${reschedule}>
+            <form class="form-card modal-card confirm-card" onClick=${(event) => event.stopPropagation()} onSubmit=${saveMove}>
                 <h2>Reschedule ${move.lead_name || ''}</h2>
                 <div class="form-grid">
                     <label class="field"><span>New time</span><input type="datetime-local" required value=${when} onInput=${(event) => setWhen(event.target.value)} /></label>
                 </div>
                 <div class="row-actions">
-                    <button class="primary" type="submit">Save</button>
+                    <button class="primary" type="submit" disabled=${savingMove}>${savingMove ? 'Saving…' : 'Save'}</button>
                     <button class="ghost" type="button" onClick=${() => setMove(null)}>Cancel</button>
                 </div>
             </form>
@@ -1222,10 +1263,9 @@ function ProjectForm({ project, onDone, onClose }) {
     const [company, setCompany] = useState(null);
     const logoUrl = useCompanyLogo(company?.logo ? company.updatedDate || 'logo' : '');
     const [places, setPlaces] = useState([]);
-    const [categories, setCategories] = useState([]);
     const [mode, setMode] = useState(project?.attendance_location_id ? 'existing' : 'none');
     const [placeId, setPlaceId] = useState(project?.attendance_location_id ? String(project.attendance_location_id) : '');
-    const [spot, setSpot] = useState({ name: '', category_id: '', category_name: '', address: '', latitude: '', longitude: '', radius_metres: '', work_start: '', work_end: '', accuracy_metres: '' });
+    const [spot, setSpot] = useState({ name: '', address: '', latitude: '', longitude: '', radius_metres: '', work_start: '', work_end: '', accuracy_metres: '' });
     const [form, setForm] = useState({
         name: project?.name || '',
         location: project?.location || '',
@@ -1241,7 +1281,6 @@ function ProjectForm({ project, onDone, onClose }) {
             if (!project?.id && row?.address) setForm((current) => current.location ? current : { ...current, location: row.address });
         }).catch(() => {});
         call('/api/v1/attendance/locations').then((rows) => setPlaces(Array.isArray(rows) ? rows : [])).catch(() => {});
-        call('/api/v1/attendance/categories').then((rows) => setCategories(Array.isArray(rows) ? rows : [])).catch(() => {});
     }, []);
     async function submit(event) {
         event.preventDefault();
@@ -1251,8 +1290,6 @@ function ProjectForm({ project, onDone, onClose }) {
             if (mode === 'new') {
                 body.attendance_location = {
                     name: spot.name || form.name,
-                    category_id: Number(spot.category_id || 0),
-                    category_name: spot.category_name || '',
                     address: spot.address || form.location || '',
                     latitude: spot.latitude,
                     longitude: spot.longitude,
@@ -1284,12 +1321,10 @@ function ProjectForm({ project, onDone, onClose }) {
             if (value === 'none' || value === 'new') { setMode(value); setPlaceId(''); return; }
             setMode('existing');
             setPlaceId(value);
-        }}><option value="none">No attendance location</option><option value="new">Create a location</option>${places.filter((row) => row.status === 'active' || String(row.id) === placeId).map((row) => html`<option key=${row.id} value=${String(row.id)}>${row.name}${row.category_name ? ' · ' + row.category_name : ''}</option>`)}</select>`, true)}
+        }}><option value="none">No attendance location</option><option value="new">Create a location</option>${places.filter((row) => row.status === 'active' || String(row.id) === placeId).map((row) => html`<option key=${row.id} value=${String(row.id)}>${row.name}</option>`)}</select>`, true)}
         ${mode === 'new' ? html`
             ${project?.attendance_location_id ? html`<p class="muted span-2">This project already has a place. Saving updates that same location.</p>` : null}
             ${field('Place name', html`<input value=${spot.name} placeholder=${form.name || 'Place name'} onInput=${setSpotKey('name')} />`)}
-            ${field('Category', html`<select value=${spot.category_id} onChange=${(event) => setSpot({ ...spot, category_id: event.target.value, category_name: '' })}><option value="">New category</option>${categories.filter((row) => row.status === 'active').map((row) => html`<option key=${row.id} value=${String(row.id)}>${row.name}</option>`)}</select>`)}
-            ${spot.category_id ? null : field('New category', html`<input value=${spot.category_name} onInput=${setSpotKey('category_name')} placeholder="Type a category" />`)}
             ${field('Place address', html`<input value=${spot.address} onInput=${setSpotKey('address')} />`)}
             ${field('Latitude', html`<input value=${spot.latitude} onInput=${setSpotKey('latitude')} />`)}
             ${field('Longitude', html`<input value=${spot.longitude} onInput=${setSpotKey('longitude')} />`)}
@@ -2642,6 +2677,7 @@ function CompanyBoard({ onSaved }) {
             if (onSaved) await onSaved();
         } catch (e) { setError(e.message); }
     }
+    const [saving, lockedSubmit] = useSubmitLock(submit);
     async function uploadLogo(event) {
         const file = event.target.files && event.target.files[0];
         event.target.value = '';
@@ -2663,7 +2699,7 @@ function CompanyBoard({ onSaved }) {
         } catch (e) { setError(e.message); }
     }
     if (!form) return html`<p class="empty-line">${error || 'Opening settings…'}</p>`;
-    return html`<form class="panel-card stack" onSubmit=${submit}>
+    return html`<form class="panel-card stack" onSubmit=${lockedSubmit}>
         <h3>Basic settings</h3>
         <p>Change the company name, email, phone, address, and logo. The email is also the owner sign-in. These details show when a site is created. The kilometre area below is used only when this workspace has no attendance locations.</p>
         ${error ? html`<p class="error">${error}</p>` : null}
@@ -2689,7 +2725,7 @@ function CompanyBoard({ onSaved }) {
                 setForm({ ...form, attendanceLat: String(place.lat), attendanceLng: String(place.lng) });
             } catch (e) { setError(e.message); }
         }}>Use my current location</button></div>
-        <div class="row-actions"><button class="primary" type="submit">Save</button></div>
+        <div class="row-actions"><button class="primary" type="submit" disabled=${saving}>${saving ? 'Saving…' : 'Save'}</button></div>
     </form>`;
 }
 const CHECK_WORD = { open: 'Checked in', done: 'Checked out', none: 'Not checked in' };
@@ -2755,7 +2791,7 @@ function MapPick({ lat, lng, onPick }) {
     return html`<div class="span-2"><div class="map-pick" ref=${box}></div>${mapError ? html`<p class="muted">${mapError}</p>` : html`<p class="muted">Click the map to set the point, or use current location.</p>`}</div>`;
 }
 function blankPlace() {
-    return { id: 0, name: '', category_id: '', category_name: '', address: '', latitude: '', longitude: '', radius_metres: '', work_start: '', work_end: '', accuracy_metres: '', status: 'active', entity_type: '', entity_id: '', user_ids: [] };
+    return { id: 0, name: '', address: '', latitude: '', longitude: '', radius_metres: '', work_start: '', work_end: '', accuracy_metres: '', status: 'active', entity_type: '', entity_id: '', user_ids: [] };
 }
 function useCanCorrect() {
     const [allowed, setAllowed] = useState(false);
@@ -2764,60 +2800,14 @@ function useCanCorrect() {
     }, []);
     return allowed;
 }
-function CategoryBoard() {
-    const canCorrect = useCanCorrect();
-    const [categories, setCategories] = useState([]);
-    const [categoryName, setCategoryName] = useState('');
-    const [error, setError] = useState('');
-    function load() {
-        setError('');
-        call('/api/v1/attendance/categories').then((rows) => setCategories(Array.isArray(rows) ? rows : [])).catch((e) => setError(e.message));
-    }
-    useEffect(() => { load(); }, []);
-    async function saveCategory(event) {
-        event.preventDefault();
-        setError('');
-        try {
-            await call('/api/v1/attendance/categories', { method: 'POST', body: { name: categoryName, status: 'active' } });
-            setCategoryName('');
-            load();
-        } catch (e) { setError(e.message); }
-    }
-    async function toggleCategory(row) {
-        setError('');
-        try {
-            await call('/api/v1/attendance/categories/' + row.id, { method: 'POST', body: { name: row.name, status: row.status === 'active' ? 'inactive' : 'active' } });
-            load();
-        } catch (e) { setError(e.message); }
-    }
-    return html`<div class="sites">
-        ${error ? html`<p class="error">${error}</p>` : null}
-        <section class="panel-card">
-            <div class="card-head"><div><h3>Location categories</h3><p>Name the kinds of places in this workspace, then add the places under Locations.</p></div></div>
-            ${canCorrect ? html`<form class="site-tools" onSubmit=${saveCategory}>
-                <label>Category<input value=${categoryName} onInput=${(event) => setCategoryName(event.target.value)} placeholder="Category name" required /></label>
-                <button class="primary" type="submit">Add category</button>
-            </form>` : html`<p class="lede">You can view categories. An admin can add or change them.</p>`}
-            <div class="table-card"><table class="board-table"><thead><tr><th>Category</th><th>Status</th>${canCorrect ? html`<th></th>` : null}</tr></thead><tbody>
-                ${categories.length === 0 ? html`<tr><td colSpan=${canCorrect ? 3 : 2}>No categories yet.</td></tr>` : categories.map((row) => html`<tr key=${row.id}>
-                    <td><strong>${row.name}</strong></td>
-                    <td><span class=${'tag ' + (row.status === 'active' ? 'ok' : 'muted')}>${row.status === 'active' ? 'Active' : 'Inactive'}</span></td>
-                    ${canCorrect ? html`<td class="row-actions">${actIcon('update', row.status === 'active' ? 'Deactivate' : 'Activate', () => toggleCategory(row))}</td>` : null}
-                </tr>`)}
-            </tbody></table></div>
-        </section>
-    </div>`;
-}
 function LocationBoard() {
     const canCorrect = useCanCorrect();
-    const [categories, setCategories] = useState([]);
     const [places, setPlaces] = useState([]);
     const [projects, setProjects] = useState([]);
     const [editing, setEditing] = useState(null);
     const [error, setError] = useState('');
     function load() {
         setError('');
-        call('/api/v1/attendance/categories').then((rows) => setCategories(Array.isArray(rows) ? rows : [])).catch((e) => setError(e.message));
         call('/api/v1/attendance/locations').then((rows) => setPlaces(Array.isArray(rows) ? rows : [])).catch((e) => setError(e.message));
         call('/api/v1/projects').then((rows) => setProjects(Array.isArray(rows) ? rows : [])).catch(() => {});
     }
@@ -2829,22 +2819,21 @@ function LocationBoard() {
                 <div><h3>Locations</h3><p>Anyone who can mark attendance can check in at an active place, inside its radius.</p></div>
                 ${canCorrect ? html`<button class="primary" type="button" onClick=${() => setEditing(blankPlace())}>Add location</button>` : null}
             </div>
-            <div class="table-card"><table class="board-table"><thead><tr><th>Location</th><th>Category</th><th>Linked record</th><th>Radius</th><th>Hours</th><th>Status</th>${canCorrect ? html`<th></th>` : null}</tr></thead><tbody>
-                ${places.length === 0 ? html`<tr><td colSpan=${canCorrect ? 7 : 6}>No locations yet. Add a category first, then a place.</td></tr>` : places.map((row) => html`<tr key=${row.id}>
+            <div class="table-card"><table class="board-table"><thead><tr><th>Location</th><th>Linked record</th><th>Radius</th><th>Hours</th><th>Status</th>${canCorrect ? html`<th></th>` : null}</tr></thead><tbody>
+                ${places.length === 0 ? html`<tr><td colSpan=${canCorrect ? 6 : 5}>No locations yet.</td></tr>` : places.map((row) => html`<tr key=${row.id}>
                     <td><strong>${row.name}</strong></td>
-                    <td>${row.category_name || '—'}</td>
                     <td>${row.entity_name || '—'}</td>
                     <td>${row.radius_metres} m</td>
                     <td>${row.work_start && row.work_end ? row.work_start + '–' + row.work_end : '—'}</td>
                     <td><span class=${'tag ' + (row.status === 'active' ? 'ok' : 'muted')}>${row.status === 'active' ? 'Active' : 'Inactive'}</span></td>
-                    ${canCorrect ? html`<td class="row-actions">${actIcon('edit', 'Edit', () => setEditing({ ...blankPlace(), ...row, category_id: String(row.category_id || ''), entity_id: row.entity_type === 'project' && row.entity_id ? String(row.entity_id) : '', entity_type: row.entity_type || '', accuracy_metres: row.accuracy_metres == null ? '' : String(row.accuracy_metres), radius_metres: String(row.radius_metres || ''), user_ids: row.user_ids || [] }))}</td>` : null}
+                    ${canCorrect ? html`<td class="row-actions">${actIcon('edit', 'Edit', () => setEditing({ ...blankPlace(), ...row, entity_id: row.entity_type === 'project' && row.entity_id ? String(row.entity_id) : '', entity_type: row.entity_type || '', accuracy_metres: row.accuracy_metres == null ? '' : String(row.accuracy_metres), radius_metres: String(row.radius_metres || ''), user_ids: row.user_ids || [] }))}</td>` : null}
                 </tr>`)}
             </tbody></table></div>
         </section>
-        ${editing ? html`<${LocationForm} place=${editing} categories=${categories} projects=${projects} onDone=${() => { setEditing(null); load(); }} onClose=${() => setEditing(null)} />` : null}
+        ${editing ? html`<${LocationForm} place=${editing} projects=${projects} onDone=${() => { setEditing(null); load(); }} onClose=${() => setEditing(null)} />` : null}
     </div>`;
 }
-function LocationForm({ place, categories, projects, onDone, onClose }) {
+function LocationForm({ place, projects, onDone, onClose }) {
     const [form, setForm] = useState(place);
     const [error, setError] = useState('');
     const set = (key) => (event) => setForm({ ...form, [key]: event.target.value });
@@ -2855,8 +2844,6 @@ function LocationForm({ place, categories, projects, onDone, onClose }) {
             const path = form.id ? '/api/v1/attendance/locations/' + form.id : '/api/v1/attendance/locations';
             await call(path, { method: 'POST', body: {
                 name: form.name,
-                category_id: Number(form.category_id || 0),
-                category_name: form.category_name || '',
                 address: form.address || '',
                 latitude: form.latitude,
                 longitude: form.longitude,
@@ -2873,8 +2860,6 @@ function LocationForm({ place, categories, projects, onDone, onClose }) {
     }
     return html`<${FormCard} title=${form.id ? 'Edit location' : 'Add location'} error=${error} onSubmit=${submit} onClose=${onClose}>
         ${field('Name', html`<input value=${form.name || ''} onInput=${set('name')} required />`)}
-        ${field('Category', html`<select value=${form.category_id || ''} onChange=${(event) => setForm({ ...form, category_id: event.target.value, category_name: '' })}><option value="">New category</option>${categories.filter((row) => row.status === 'active' || String(row.id) === String(form.category_id)).map((row) => html`<option key=${row.id} value=${String(row.id)}>${row.name}</option>`)}</select>`)}
-        ${form.category_id ? null : field('New category', html`<input value=${form.category_name || ''} onInput=${set('category_name')} placeholder="Type a category" />`)}
         ${field('Address', html`<input value=${form.address || ''} onInput=${set('address')} />`, true)}
         ${field('Latitude', html`<input value=${form.latitude || ''} onInput=${set('latitude')} />`)}
         ${field('Longitude', html`<input value=${form.longitude || ''} onInput=${set('longitude')} />`)}
@@ -2956,9 +2941,8 @@ function AttendanceBoard({ user }) {
             <button class="ghost" type="button" onClick=${() => setDate(today)}>Today</button>
             <button class="ghost" type="button" onClick=${() => {
                 const teamName = Object.fromEntries(teams.map((team) => [String(team.id), team.name]));
-                downloadSheet('Attendance ' + date, ['Location', 'Category', 'User', 'Team', 'Check in', 'Check out', 'Status'], lines.map((line) => [
+                downloadSheet('Attendance ' + date, ['Location', 'User', 'Team', 'Check in', 'Check out', 'Status'], lines.map((line) => [
                     line.session?.location_name || line.session?.check_in_place || '',
-                    line.session?.category_name || '',
                     line.person.name || '',
                     teamName[String(line.person.team_id || '')] || '',
                     line.session?.check_in ? clock(line.session.check_in) : (line.mark?.check_in ? clock(line.mark.check_in) : ''),
@@ -2971,16 +2955,15 @@ function AttendanceBoard({ user }) {
         <section class="panel-card">
             <div class="card-head"><div><h3>${prettyDate(date)}</h3><p>One list for the day. Location comes first, then the person, check-in, and check-out.</p></div></div>
             <div class="table-card attend-sheet"><table class="board-table"><thead><tr>
-                <th>Location</th><th>Category</th><th>User</th><th>Check in</th><th>Check out</th><th>Status</th><th></th>
+                <th>Location</th><th>User</th><th>Check in</th><th>Check out</th><th>Status</th><th></th>
             </tr></thead><tbody>
-                ${lines.length === 0 ? html`<tr><td colSpan="7">No one to show for this day.</td></tr>` : lines.map((line) => {
+                ${lines.length === 0 ? html`<tr><td colSpan="6">No one to show for this day.</td></tr>` : lines.map((line) => {
                     const status = line.session?.status || line.mark?.status || '';
                     const open = line.session ? line.session.check_status === 'open' : !!(line.mark?.check_in && !line.mark?.check_out);
                     const checkIn = line.session?.check_in || line.mark?.check_in;
                     const checkOut = line.session?.check_out || line.mark?.check_out;
                     return html`<tr key=${line.key}>
                         <td><strong>${line.session?.location_name || line.session?.check_in_place || '—'}</strong></td>
-                        <td>${line.session?.category_name || '—'}</td>
                         <td class="attend-name"><strong>${line.person.name}</strong><em>${line.person.role_name || line.person.profile || ''}</em></td>
                         <td class="time-cell in">${timeText(checkIn)}</td>
                         <td class="time-cell out">${timeText(checkOut)}</td>
@@ -2994,7 +2977,7 @@ function AttendanceBoard({ user }) {
     </div>`;
 }
 function placeOption(row) {
-    const name = [row.name || 'Location', row.category_name].filter(Boolean).join(' · ');
+    const name = row.name || 'Location';
     const extra = [];
     if (row.entity_name) extra.push(row.entity_name);
     if (row.distance_metres != null) extra.push(row.distance_metres + ' m away');
@@ -3209,9 +3192,8 @@ function App() {
                 ${spec && spec.kind === 'sites' ? html`<${SitesBoard} key=${screen} start=${spec.start} />` : null}
                 ${spec && spec.kind === 'attendance' ? html`<${AttendanceBoard} key="attendance" user=${user} />` : null}
                 ${spec && spec.kind === 'locations' ? html`<${LocationBoard} key="locations" />` : null}
-                ${spec && spec.kind === 'location-categories' ? html`<${CategoryBoard} key="location-categories" />` : null}
                 ${spec && spec.kind === 'company' ? html`<${CompanyBoard} onSaved=${async () => { setUser(await call('/api/v1/me')); setCompany(await call('/api/v1/company')); }} />` : null}
-                ${spec && screen !== 'notifications' && screen !== 'whatsapp' && spec.kind !== 'sites' && spec.kind !== 'attendance' && spec.kind !== 'locations' && spec.kind !== 'location-categories' && spec.kind !== 'company' ? html`<${Resource} key=${screen} title=${title} lede=${spec.lede} spec=${spec} />` : null}
+                ${spec && screen !== 'notifications' && screen !== 'whatsapp' && spec.kind !== 'sites' && spec.kind !== 'attendance' && spec.kind !== 'locations' && spec.kind !== 'company' ? html`<${Resource} key=${screen} title=${title} lede=${spec.lede} spec=${spec} />` : null}
                 ${passwordOpen ? html`<${ChangePassword} onClose=${() => setPasswordOpen(false)} />` : null}
             </main>
         </div>

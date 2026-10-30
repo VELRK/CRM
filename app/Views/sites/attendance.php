@@ -127,7 +127,7 @@ $todayNum = (int) date('j');
                     <select name="location_id">
                         <option value="">Leave or absence needs no location</option>
                         <?php foreach ($locations as $place) : ?>
-                            <option value="<?= (int) $place['id'] ?>"><?= esc((string) $place['name']) ?><?= ! empty($place['category_name']) ? ' · ' . esc((string) $place['category_name']) : '' ?></option>
+                            <option value="<?= (int) $place['id'] ?>"><?= esc((string) $place['name']) ?></option>
                         <?php endforeach; ?>
                     </select>
                 </label>

@@ -73,77 +73,10 @@ class AttendanceLocationService
     /**
      * @return list<array<string, mixed>>
      */
-    public function categories(int $tenantId): array
-    {
-        $this->ensure();
-
-        return $this->db->table('attendance_location_categories')
-            ->where('tenant_id', $tenantId)
-            ->where('deleted_at', null)
-            ->orderBy('name', 'ASC')
-            ->get()
-            ->getResultArray();
-    }
-
-    /**
-     * @param array<string, mixed> $input
-     */
-    public function saveCategory(int $tenantId, ?int $id, array $input): int
-    {
-        $this->ensure();
-        $name = trim((string) ($input['name'] ?? ''));
-        $status = (string) ($input['status'] ?? 'active');
-
-        if ($name === '' || strlen($name) > 80) {
-            throw new RuntimeException('A location category needs a name.');
-        }
-
-        if (! in_array($status, ['active', 'inactive'], true)) {
-            throw new RuntimeException('Choose a category status.');
-        }
-
-        $dupe = $this->db->table('attendance_location_categories')
-            ->where('tenant_id', $tenantId)
-            ->where('deleted_at', null)
-            ->where('name', $name);
-
-        if ($id !== null) {
-            $dupe->where('id !=', $id);
-        }
-
-        if ($dupe->countAllResults() > 0) {
-            throw new RuntimeException('That location category already exists.');
-        }
-
-        $now = date('Y-m-d H:i:s');
-        $data = ['name' => $name, 'status' => $status, 'updated_at' => $now];
-
-        if ($id === null) {
-            $data['tenant_id'] = $tenantId;
-            $data['created_at'] = $now;
-            $this->db->table('attendance_location_categories')->insert($data);
-
-            return (int) $this->db->insertID();
-        }
-
-        if ($this->category($tenantId, $id) === null) {
-            throw new RuntimeException('That location category is not in this workspace.');
-        }
-
-        $this->db->table('attendance_location_categories')->where('id', $id)->update($data);
-
-        return $id;
-    }
-
-    /**
-     * @return list<array<string, mixed>>
-     */
     public function locations(int $tenantId, bool $withUsers): array
     {
         $this->ensure();
         $rows = $this->db->table('attendance_locations l')
-            ->select('l.*, c.name AS category_name, c.status AS category_status')
-            ->join('attendance_location_categories c', 'c.id = l.category_id', 'left')
             ->where('l.tenant_id', $tenantId)
             ->where('l.deleted_at', null)
             ->orderBy('l.name', 'ASC')
@@ -291,7 +224,7 @@ class AttendanceLocationService
         $cards = [];
 
         foreach ($this->locations($tenantId, false) as $row) {
-            if ((string) $row['status'] !== 'active' || (string) ($row['category_status'] ?? '') !== 'active') {
+            if ((string) $row['status'] !== 'active') {
                 continue;
             }
 
@@ -327,10 +260,9 @@ class AttendanceLocationService
     {
         $this->ensure();
         $builder = $this->db->table('attendance_sessions s')
-            ->select('s.*, u.name AS user_name, l.name AS location_name, c.name AS category_name, l.entity_type, l.entity_id')
+            ->select('s.*, u.name AS user_name, l.name AS location_name, l.entity_type, l.entity_id')
             ->join('users u', 'u.id = s.user_id', 'left')
             ->join('attendance_locations l', 'l.id = s.location_id', 'left')
-            ->join('attendance_location_categories c', 'c.id = l.category_id', 'left')
             ->where('s.tenant_id', $tenantId)
             ->where('s.deleted_at', null);
 
@@ -371,7 +303,6 @@ class AttendanceLocationService
             'check_status'       => $checkedOut ? 'done' : 'open',
             'location_id'        => (int) $row['location_id'],
             'location_name'      => $place,
-            'category_name'      => ($row['category_name'] ?? '') !== '' ? $row['category_name'] : null,
             'entity_type'        => $entityType !== '' ? $entityType : null,
             'entity_id'          => $entityId > 0 ? $entityId : null,
             'entity_name'        => $entityType === 'project' ? ($projects[$entityId] ?? null) : null,
@@ -396,7 +327,7 @@ class AttendanceLocationService
         if ($all) {
             return array_values(array_filter(
                 $this->locations($tenantId, false),
-                static fn (array $row): bool => (string) $row['status'] === 'active' && (string) ($row['category_status'] ?? '') === 'active',
+                static fn (array $row): bool => (string) $row['status'] === 'active',
             ));
         }
 
@@ -418,7 +349,7 @@ class AttendanceLocationService
         $note = trim((string) ($input['note'] ?? ''));
 
         if (! $correcting) {
-            if ((string) $location['status'] !== 'active' || (string) ($location['category_status'] ?? '') !== 'active') {
+            if ((string) $location['status'] !== 'active') {
                 throw new RuntimeException('This attendance location is not active.');
             }
 
@@ -487,13 +418,10 @@ class AttendanceLocationService
     {
         $this->ensure();
 
-        return $this->db->table('attendance_locations l')
-            ->join('attendance_location_categories c', 'c.id = l.category_id')
-            ->where('l.tenant_id', $tenantId)
-            ->where('l.deleted_at', null)
-            ->where('l.status', 'active')
-            ->where('c.deleted_at', null)
-            ->where('c.status', 'active')
+        return $this->db->table('attendance_locations')
+            ->where('tenant_id', $tenantId)
+            ->where('deleted_at', null)
+            ->where('status', 'active')
             ->countAllResults() > 0;
     }
 
@@ -716,7 +644,6 @@ class AttendanceLocationService
         $entity = $this->entity($tenantId, $id, $input);
 
         return [
-            'category_id'     => $this->categoryId($tenantId, $input),
             'name'            => $name,
             'address'         => $address !== '' ? $address : null,
             'latitude'        => $lat,
@@ -776,40 +703,6 @@ class AttendanceLocationService
     }
 
     /**
-     * @param array<string, mixed> $input
-     */
-    private function categoryId(int $tenantId, array $input): int
-    {
-        $id = (int) ($input['category_id'] ?? 0);
-        $name = trim((string) ($input['category_name'] ?? ''));
-
-        if ($id > 0) {
-            if ($this->category($tenantId, $id) === null) {
-                throw new RuntimeException('Choose a location category.');
-            }
-
-            return $id;
-        }
-
-        if ($name === '') {
-            throw new RuntimeException('Choose a location category.');
-        }
-
-        $existing = $this->db->table('attendance_location_categories')
-            ->where('tenant_id', $tenantId)
-            ->where('deleted_at', null)
-            ->where('name', $name)
-            ->get()
-            ->getRowArray();
-
-        if ($existing !== null) {
-            return (int) $existing['id'];
-        }
-
-        return $this->saveCategory($tenantId, null, ['name' => $name, 'status' => 'active']);
-    }
-
-    /**
      * @param list<mixed> $userIds
      */
     private function syncUsers(int $tenantId, int $locationId, array $userIds): void
@@ -854,27 +747,10 @@ class AttendanceLocationService
     /**
      * @return array<string, mixed>|null
      */
-    private function category(int $tenantId, int $id): ?array
-    {
-        $row = $this->db->table('attendance_location_categories')
-            ->where('tenant_id', $tenantId)
-            ->where('id', $id)
-            ->where('deleted_at', null)
-            ->get()
-            ->getRowArray();
-
-        return $row ?: null;
-    }
-
-    /**
-     * @return array<string, mixed>|null
-     */
     private function location(int $tenantId, int $id): ?array
     {
         $this->ensure();
         $row = $this->db->table('attendance_locations l')
-            ->select('l.*, c.name AS category_name, c.status AS category_status')
-            ->join('attendance_location_categories c', 'c.id = l.category_id', 'left')
             ->where('l.tenant_id', $tenantId)
             ->where('l.id', $id)
             ->where('l.deleted_at', null)
@@ -967,6 +843,8 @@ class AttendanceLocationService
             $row['user_ids'] = $userIds;
         }
 
+        unset($row['category_id'], $row['category_name'], $row['category_status']);
+
         return $row;
     }
 
@@ -1001,7 +879,6 @@ class AttendanceLocationService
         return [
             'id'               => (int) $row['id'],
             'name'             => $row['name'],
-            'category_name'    => $row['category_name'] ?? null,
             'address'          => $row['address'],
             'latitude'         => $row['latitude'],
             'longitude'        => $row['longitude'],
@@ -1137,27 +1014,11 @@ class AttendanceLocationService
 
         $forge = \Config\Database::forge();
 
-        if (! $this->db->tableExists('attendance_location_categories')) {
-            $forge->addField([
-                'id'         => ['type' => 'INT', 'unsigned' => true, 'auto_increment' => true],
-                'tenant_id'  => ['type' => 'INT', 'unsigned' => true],
-                'name'       => ['type' => 'VARCHAR', 'constraint' => 80],
-                'status'     => ['type' => 'VARCHAR', 'constraint' => 16, 'default' => 'active'],
-                'created_at' => ['type' => 'DATETIME', 'null' => true],
-                'updated_at' => ['type' => 'DATETIME', 'null' => true],
-                'deleted_at' => ['type' => 'DATETIME', 'null' => true],
-            ]);
-            $forge->addKey('id', true);
-            $forge->addKey(['tenant_id', 'status']);
-            $forge->createTable('attendance_location_categories');
-            $this->db->resetDataCache();
-        }
-
         if (! $this->db->tableExists('attendance_locations')) {
             $forge->addField([
                 'id'              => ['type' => 'INT', 'unsigned' => true, 'auto_increment' => true],
                 'tenant_id'       => ['type' => 'INT', 'unsigned' => true],
-                'category_id'     => ['type' => 'INT', 'unsigned' => true],
+                'category_id'     => ['type' => 'INT', 'unsigned' => true, 'null' => true],
                 'name'            => ['type' => 'VARCHAR', 'constraint' => 120],
                 'address'         => ['type' => 'VARCHAR', 'constraint' => 255, 'null' => true],
                 'latitude'        => ['type' => 'DECIMAL', 'constraint' => '10,7'],
@@ -1178,6 +1039,15 @@ class AttendanceLocationService
             $forge->addKey(['tenant_id', 'entity_type', 'entity_id']);
             $forge->createTable('attendance_locations');
             $this->db->resetDataCache();
+        }
+
+        if ($this->db->fieldExists('category_id', 'attendance_locations')) {
+            foreach ($this->db->getFieldData('attendance_locations') as $field) {
+                if ($field->name === 'category_id' && empty($field->nullable)) {
+                    $this->db->query('ALTER TABLE attendance_locations MODIFY category_id INT UNSIGNED NULL');
+                    $this->db->resetDataCache();
+                }
+            }
         }
 
         if (! $this->db->tableExists('attendance_location_users')) {

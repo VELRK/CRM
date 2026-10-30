@@ -1203,26 +1203,6 @@ class DeskApi extends BaseController
         });
     }
 
-    public function attendanceCategories(): ResponseInterface
-    {
-        if ($denied = $this->guardAny(['attendance.view', 'attendance.mark', 'attendance.correct', 'projects.view'])) {
-            return $denied;
-        }
-
-        return $this->ok($this->places()->categories($this->tenant()));
-    }
-
-    public function saveAttendanceCategory(?int $id = null): ResponseInterface
-    {
-        if ($denied = $this->guard('attendance.correct')) {
-            return $denied;
-        }
-
-        return $this->run(function () use ($id) {
-            return $this->ok(['id' => $this->places()->saveCategory($this->tenant(), $id, $this->input())]);
-        });
-    }
-
     public function attendanceLocations(): ResponseInterface
     {
         if ($denied = $this->guardAny(['attendance.view', 'attendance.mark', 'attendance.correct', 'projects.view'])) {

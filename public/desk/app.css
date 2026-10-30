@@ -533,6 +533,7 @@ input.locked { background: #f4f6f4; color: #111; }
 .fact .act { width: 32px; height: 32px; }
 .note header .act { width: 32px; height: 32px; }
 .primary { background: linear-gradient(180deg, #16A34A, #0B7A40); font-weight: 700; box-shadow: 0 2px 0 #065F32; }
+button.primary:disabled, button.danger:disabled { opacity: .55; cursor: wait; }
 .primary:hover { filter: brightness(1.06); }
 .danger { background: #E11D48; border-color: #E11D48; font-weight: 700; box-shadow: 0 2px 0 #9F1239; }
 .login-hero { background: linear-gradient(150deg, #14B86A 0%, #0B7A40 46%, #0C4A6E 100%); }

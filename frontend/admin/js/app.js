@@ -182,6 +182,21 @@
         }
     });
 
+    document.addEventListener('submit', function (event) {
+        var form = event.target;
+        if (!form || String(form.method || '').toLowerCase() !== 'post') {
+            return;
+        }
+        if (form.getAttribute('data-sent') === '1') {
+            event.preventDefault();
+            return;
+        }
+        form.setAttribute('data-sent', '1');
+        form.querySelectorAll('button[type="submit"], input[type="submit"]').forEach(function (button) {
+            button.disabled = true;
+        });
+    });
+
     document.querySelectorAll('[data-line-product]').forEach(function (select) {
         select.addEventListener('change', function () {
             var option = select.selectedOptions[0];
