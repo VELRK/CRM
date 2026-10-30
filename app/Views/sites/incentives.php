@@ -4,16 +4,9 @@
     <div>
         <p class="eyebrow">Sales</p>
         <h1>Incentives</h1>
-        <p class="lede">A sale is recorded when a plot is marked booked, sold or registered. The percentage below is applied to that sale.</p>
+        <p class="lede">A sale is recorded when a plot is marked booked, sold or registered. The incentive is the commission entered on that plot.</p>
     </div>
 </header>
-<?php if (in_array('incentives.approve', $can, true)) : ?>
-<form method="post" action="<?= site_url('app/incentives/rule') ?>" class="search">
-    <?= csrf_field() ?>
-    <label>Percent <input name="incentive_percent" value="<?= esc((string) $percent) ?>" inputmode="decimal"></label>
-    <button class="ghost" type="submit">Save rule</button>
-</form>
-<?php endif; ?>
 <?php if ($incentives === []) : ?>
     <section class="panel"><div class="empty"><?= icon('inbox') ?><p>No incentives yet.</p></div></section>
 <?php else : ?>

@@ -197,7 +197,6 @@ class EstateController extends PortalController
         return $this->page('sites/incentives', [
             'active'     => 'incentives',
             'incentives' => $this->estate->incentives($this->tenantId),
-            'percent'    => $this->estate->setting($this->tenantId, 'incentive_percent') ?? '2',
         ]);
     }
 
@@ -351,7 +350,7 @@ class EstateController extends PortalController
 
     public function exportPlots()
     {
-        return $this->csv('plots.view', 'plots.csv', ['Project', 'Plot', 'Block', 'Area', 'Facing', 'Price', 'Status'], array_map(static function (array $row): array {
+        return $this->csv('plots.view', 'plots.csv', ['Project', 'Plot', 'Block', 'Area', 'Facing', 'Price', 'Commission', 'Status'], array_map(static function (array $row): array {
             return [
                 $row['project_name'],
                 $row['plot_no'],
@@ -359,6 +358,7 @@ class EstateController extends PortalController
                 $row['area_sqft'],
                 $row['facing'],
                 ((int) $row['price_minor']) / 100,
+                ((int) ($row['commission_minor'] ?? 0)) / 100,
                 $row['status'],
             ];
         }, $this->sites->plots($this->tenantId, (int) $this->request->getGet('project'))));

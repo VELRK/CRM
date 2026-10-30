@@ -412,6 +412,12 @@ class EstateService
             throw new RuntimeException('A booked, sold, or registered plot needs the associate and the lead. The incentive is added at that moment.');
         }
 
+        $amount = (int) ($plot['commission_minor'] ?? 0);
+
+        if ($amount < 1) {
+            throw new RuntimeException('Enter the commission for this plot.');
+        }
+
         $value = trim((string) ($input['sale_value'] ?? ''));
         $minor = $value === '' ? (int) $plot['price_minor'] : BookService::rupeesToMinor($value);
         $now = date('Y-m-d H:i:s');
@@ -439,8 +445,6 @@ class EstateService
             'created_at'       => $now,
         ]);
         $saleId = (int) $this->db->insertID();
-        $percent = (float) ($this->setting($tenantId, 'incentive_percent') ?? '2');
-        $amount = (int) round($minor * $percent / 100);
         $eligible = (int) ($profile['incentive_eligible'] ?? 1);
         $this->db->table('incentives')->insert([
             'tenant_id'    => $tenantId,
@@ -448,7 +452,7 @@ class EstateService
             'user_id'      => $staffId,
             'status'       => $eligible === 0 ? 'not_eligible' : 'pending',
             'amount_minor' => $amount,
-            'rule_note'    => $percent . '% of the sale value',
+            'rule_note'    => 'Commission entered on the plot',
             'created_at'   => $now,
             'updated_at'   => $now,
         ]);

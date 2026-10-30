@@ -1415,7 +1415,7 @@ function SitesBoard({ start }) {
 function PlotTable({ rows, mode, onEdit, onDelete }) {
     if (!rows.length) return html`<p class="empty-line">Nothing in this view.</p>`;
     return html`<div class="table-card"><table class="board-table"><thead><tr>
-        <th>Project</th><th>Phase</th><th>Plot no</th>
+        <th>Project</th><th>Phase</th><th>Plot no</th><th>Commission</th>
         ${mode === 'available' ? html`<th>Status</th><th>Registration</th>${onEdit ? html`<th></th>` : null}` : null}
         ${mode === 'booking' ? html`<th>Customer</th><th>Contact</th><th>Associate</th><th>Team head</th><th>Status</th><th>Booking date</th><th>Advance</th><th>Advance deadline</th><th>Deadline</th><th>Booking amount</th><th>Balance</th><th></th>` : null}
         ${mode === 'follow' ? html`<th>Customer</th><th>Contact</th><th>Associate</th><th>Team head</th><th>Advance</th><th>Advance received</th><th>Deadline</th><th>Days left</th><th>Status</th><th>Registration</th><th>Expected</th><th>Remarks</th>${onEdit ? html`<th></th>` : null}` : null}
@@ -1426,6 +1426,7 @@ function PlotTable({ rows, mode, onEdit, onDelete }) {
             <td>${row.project_name || '—'}</td>
             <td>${row.phase || row.block || '—'}</td>
             <td>${row.plot_no || '—'}</td>
+            <td>${money(row.commission_minor)}</td>
             ${mode === 'available' ? html`<td>${plotTag(row.status)}</td><td>${regCell(row)}</td>${onEdit ? html`<td><button class="ghost" type="button" onClick=${() => onEdit(row)}>Book</button></td>` : null}` : null}
             ${mode === 'booking' ? html`<td>${row.customer_name || '—'}</td><td>${row.customer_phone || '—'}</td><td>${row.associate_name || '—'}</td><td>${row.head_name || '—'}</td><td>${plotTag(row.status)}</td><td>${prettyDate(row.booking_on)}</td><td>${money(row.advance_minor)}</td><td>${prettyDate(row.advance_deadline)}</td><td>${deadlineCell(row)}</td><td>${money(row.booking_amount_minor)}</td><td>${money(row.balance_minor)}</td><td><button class="ghost" type="button" onClick=${() => onEdit(row)}>Edit</button></td>` : null}
             ${mode === 'follow' ? html`<td>${row.customer_name || '—'}</td><td>${row.customer_phone || '—'}</td><td>${row.associate_name || '—'}</td><td>${row.head_name || '—'}</td><td>${money(row.advance_minor)}</td><td>${prettyDate(row.advance_received_on)}</td><td>${prettyDate(row.registration_deadline)}</td><td>${leftCell(row)}</td><td>${plotTag(row.status)}</td><td>${regCell(row)}</td><td>${prettyDate(row.expected_registration_on)}</td><td>${row.remarks || '—'}</td>${onEdit ? html`<td><button class="ghost" type="button" onClick=${() => onEdit(row)}>Edit</button></td>` : null}` : null}
@@ -1462,6 +1463,7 @@ function BookingForm({ plot, people, onDone, onClose }) {
         advance: plot.advance_minor ? String(Math.round(Number(plot.advance_minor) / 100)) : '',
         advanceReceivedOn: String(plot.advance_received_on || '').slice(0, 10),
         bookingAmount: plot.booking_amount_minor ? String(Math.round(Number(plot.booking_amount_minor) / 100)) : '',
+        commission: Number(plot.commission_minor) > 0 ? String(Math.round(Number(plot.commission_minor) / 100)) : '',
         expectedRegistrationOn: String(plot.expected_registration_on || '').slice(0, 10),
         registeredOn: String(plot.registered_on || '').slice(0, 10),
         remarks: plot.remarks || '',
@@ -1473,6 +1475,7 @@ function BookingForm({ plot, people, onDone, onClose }) {
     async function submit(event) {
         event.preventDefault();
         setError('');
+        if (!String(form.commission).trim() || Number(form.commission) <= 0) { setError('Enter the commission for this plot.'); return; }
         if (sale && !form.associateUserId) { setError('Choose the associate. The incentive is added for that person.'); return; }
         if (sale && !form.leadId) { setError('Choose the lead. The incentive is added when the plot is booked, sold, or registered.'); return; }
         try {
@@ -1490,18 +1493,20 @@ function BookingForm({ plot, people, onDone, onClose }) {
         ${xrow('Advance', html`<input type="number" min="0" value=${form.advance} onInput=${set('advance')} />`)}
         ${xrow('Advance received', html`<input type="date" value=${form.advanceReceivedOn} onInput=${set('advanceReceivedOn')} />`)}
         ${xrow('Booking amount', html`<input type="number" min="0" value=${form.bookingAmount} onInput=${set('bookingAmount')} />`)}
+        ${xrow('Commission', html`<input type="number" min="1" value=${form.commission} onInput=${set('commission')} />`, true)}
         ${xrow('Expected registration', html`<input type="date" value=${form.expectedRegistrationOn} onInput=${set('expectedRegistrationOn')} />`)}
         ${xrow('Actual registration', html`<input type="date" value=${form.registeredOn} onInput=${set('registeredOn')} />`)}
         ${xrow('Remarks', html`<textarea value=${form.remarks} onInput=${set('remarks')}></textarea>`, false, true)}
     `, true, 'Save');
 }
 function PlotForm({ projects, onDone, onClose }) {
-    const [form, setForm] = useState({ project_id: projects[0] ? String(projects[0].id) : '', phase: '', plot_no: '', facing: '', area_sqft: '', status: 'available' });
+    const [form, setForm] = useState({ project_id: projects[0] ? String(projects[0].id) : '', phase: '', plot_no: '', facing: '', area_sqft: '', commission: '', status: 'available' });
     const [error, setError] = useState('');
     const set = (key) => (event) => setForm({ ...form, [key]: event.target.value });
     async function submit(event) {
         event.preventDefault();
         setError('');
+        if (!String(form.commission).trim() || Number(form.commission) <= 0) { setError('Enter the commission for this plot.'); return; }
         try {
             await call('/api/v1/plots', { method: 'POST', body: { ...form, project_id: Number(form.project_id) } });
             onDone();
@@ -1513,6 +1518,7 @@ function PlotForm({ projects, onDone, onClose }) {
         ${xrow('Plot no', html`<input value=${form.plot_no} onInput=${set('plot_no')} />`, true)}
         ${xrow('Facing', html`<input value=${form.facing} onInput=${set('facing')} />`)}
         ${xrow('Area', html`<input value=${form.area_sqft} onInput=${set('area_sqft')} />`)}
+        ${xrow('Commission', html`<input type="number" min="1" value=${form.commission} onInput=${set('commission')} />`, true)}
         ${xrow('Status', html`<select value=${form.status} onChange=${set('status')}>${['available', 'hold', 'owner_use', 'future', 'blocked'].map((value) => html`<option key=${value} value=${value}>${PLOT_LABEL[value]}</option>`)}</select>`, true)}
     `, true, 'Add');
 }

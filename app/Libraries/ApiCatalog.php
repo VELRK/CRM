@@ -63,12 +63,12 @@ class ApiCatalog
             self::entry('Files', 'FR-2.2', 'Files on a record', 'GET', '/api/v1/files?type=project&id=1', true, 'files.view', null, ['ok' => true, 'data' => [['id' => 3, 'name' => 'layout.pdf']]]),
             self::entry('Files', 'FR-2.2', 'Attach a file', 'POST', '/api/v1/files', true, 'files.attach', ['type' => 'project', 'subject_id' => 1, 'file' => '(multipart field file)'], ['ok' => true, 'data' => ['id' => 3]]),
 
-            self::entry('Plots', 'FR-3.5', 'List plots', 'GET', '/api/v1/plots?project=1&status=available', true, 'plots.view', null, ['ok' => true, 'data' => [['id' => 1, 'project_id' => 1, 'project_name' => 'Green Meadows', 'phase' => 'A', 'plot_no' => 'A-12', 'facing' => 'East', 'area_sqft' => '1200.00', 'status' => 'available', 'customer_name' => null, 'associate_name' => null, 'head_name' => null]]]),
+            self::entry('Plots', 'FR-3.5', 'List plots', 'GET', '/api/v1/plots?project=1&status=available', true, 'plots.view', null, ['ok' => true, 'data' => [['id' => 1, 'project_id' => 1, 'project_name' => 'Green Meadows', 'phase' => 'A', 'plot_no' => 'A-12', 'facing' => 'East', 'area_sqft' => '1200.00', 'commission_minor' => 5000000, 'status' => 'available', 'customer_name' => null, 'associate_name' => null, 'head_name' => null]]]),
             self::entry('Plots', 'FR-3.1', 'Create plot', 'POST', '/api/v1/plots', true, 'plots.create', [
-                'project_id' => 1, 'phase' => 'A', 'plot_no' => 'A-13', 'facing' => 'East', 'area_sqft' => '1200', 'status' => 'available',
+                'project_id' => 1, 'phase' => 'A', 'plot_no' => 'A-13', 'facing' => 'East', 'area_sqft' => '1200', 'commission' => '50000', 'status' => 'available',
             ], ['ok' => true, 'data' => ['id' => 2, 'status' => 'available']]),
             self::entry('Plots', 'FR-3.1', 'Update a plot record', 'POST', '/api/v1/plots/1', true, 'plots.update', [
-                'project_id' => 1, 'phase' => 'A', 'plot_no' => 'A-12', 'facing' => 'East', 'area_sqft' => '1200', 'status' => 'hold',
+                'project_id' => 1, 'phase' => 'A', 'plot_no' => 'A-12', 'facing' => 'East', 'area_sqft' => '1200', 'commission' => '50000', 'status' => 'hold',
             ], ['ok' => true, 'data' => ['id' => 1, 'status' => 'hold']]),
             self::entry('Plots', 'FR-3.4', 'Plot status history', 'GET', '/api/v1/plots/1/history', true, 'plots.view', null, ['ok' => true, 'data' => [['old_status' => 'available', 'new_status' => 'booked', 'remark' => 'Token received', 'created_at' => '2026-10-24 15:00:00']]]),
             self::entry('Plots', 'FR-3.5', 'Export plots', 'GET', '/api/v1/plots/export', true, 'exports.download', null, 'CSV file'),
@@ -130,7 +130,7 @@ class ApiCatalog
             self::entry('Projects', 'FR-2.1', 'Delete project', 'POST', '/api/v1/projects/1/delete', true, 'projects.delete', new \stdClass(), ['ok' => true, 'data' => ['id' => 1, 'deleted' => true]]),
             self::entry('Plots', 'FR-3.6', 'Save booking', 'POST', '/api/v1/plots/1/booking', true, 'plots.update', [
                 'status' => 'booked', 'customerName' => 'Ravi Kumar', 'customerPhone' => '9840012345', 'associateUserId' => 2,
-                'bookingOn' => '2026-10-29', 'advance' => '50000', 'advanceReceivedOn' => '2026-10-29', 'bookingAmount' => '2500000',
+                'bookingOn' => '2026-10-29', 'advance' => '50000', 'advanceReceivedOn' => '2026-10-29', 'bookingAmount' => '2500000', 'commission' => '50000',
                 'expectedRegistrationOn' => '2026-12-08', 'registeredOn' => '', 'remarks' => 'Token received',
             ], ['ok' => true, 'data' => ['id' => 1, 'status' => 'booked', 'customer_name' => 'Ravi Kumar', 'customer_phone' => '9840012345', 'associate_name' => 'Priya', 'head_name' => 'Priya', 'advance_minor' => 5000000, 'booking_amount_minor' => 250000000, 'booking_on' => '2026-10-29']]),
             self::entry('Plots', 'FR-3.1', 'Delete plot', 'POST', '/api/v1/plots/1/delete', true, 'plots.delete', new \stdClass(), ['ok' => true, 'data' => ['id' => 1, 'deleted' => true]]),

@@ -13,6 +13,8 @@ class SiteService
     public const VISIT_STATUSES   = ['scheduled', 'completed', 'cancelled', 'rescheduled', 'no_show', 'planned', 'attended', 'missed'];
     public const SALE_STATUSES    = ['booked', 'sold', 'registered'];
 
+    private bool $commissionReady = false;
+
     public function __construct(private BaseConnection $db)
     {
     }
@@ -219,6 +221,7 @@ class SiteService
      */
     public function plots(int $tenantId, int $projectId = 0): array
     {
+        $this->ensureCommissionColumn();
         $builder = $this->db->table('plots p')
             ->select('p.*, pr.name AS project_name, a.name AS associate_name, h.name AS head_name')
             ->join('projects pr', 'pr.id = p.project_id')
@@ -242,6 +245,7 @@ class SiteService
      */
     public function plot(int $tenantId, int $id): ?array
     {
+        $this->ensureCommissionColumn();
         $row = $this->db->table('plots')
             ->where('tenant_id', $tenantId)
             ->where('id', $id)
@@ -257,6 +261,7 @@ class SiteService
      */
     public function savePlot(int $tenantId, ?int $id, array $input): int
     {
+        $this->ensureCommissionColumn();
         $projectId = (int) ($input['project_id'] ?? 0);
 
         if ($this->project($tenantId, $projectId) === null) {
@@ -318,6 +323,7 @@ class SiteService
             'unit'        => $this->blank($input['unit'] ?? null) ?? 'sqft',
             'price_per_unit_minor' => BookService::rupeesToMinor((string) ($input['price_per_unit'] ?? '')),
             'price_minor' => BookService::rupeesToMinor((string) ($input['price'] ?? '')),
+            'commission_minor' => $this->commissionMinor($input),
             'status'      => $status,
             'updated_at'  => $now,
         ];
@@ -350,6 +356,7 @@ class SiteService
      */
     public function saveBooking(int $tenantId, int $id, array $input): void
     {
+        $this->ensureCommissionColumn();
         $plot = $this->plot($tenantId, $id);
 
         if ($plot === null) {
@@ -402,12 +409,43 @@ class SiteService
             'advance_minor'            => BookService::rupeesToMinor((string) ($input['advance'] ?? '0')),
             'advance_received_on'      => $this->blank($input['advanceReceivedOn'] ?? $input['advance_received_on'] ?? null),
             'booking_amount_minor'     => BookService::rupeesToMinor((string) ($input['bookingAmount'] ?? '0')),
+            'commission_minor'         => $this->commissionMinor($input),
             'expected_registration_on' => $this->blank($input['expectedRegistrationOn'] ?? $input['expected_registration_on'] ?? null),
             'registered_on'            => $this->blank($input['registeredOn'] ?? $input['registered_on'] ?? null),
             'remarks'                  => $this->blank($input['remarks'] ?? null),
             'updated_at'               => date('Y-m-d H:i:s'),
         ]);
         $this->logPlotStatus($tenantId, $id, $previous, $status, (int) ($input['by_user_id'] ?? 0), (string) ($input['remarks'] ?? ''));
+    }
+
+    public function ensureCommissionColumn(): void
+    {
+        if ($this->commissionReady) {
+            return;
+        }
+
+        if (! $this->db->fieldExists('commission_minor', 'plots')) {
+            \Config\Database::forge()->addColumn('plots', [
+                'commission_minor' => ['type' => 'BIGINT', 'default' => 0],
+            ]);
+            $this->db->resetDataCache();
+        }
+
+        $this->commissionReady = true;
+    }
+
+    /**
+     * @param array<string, mixed> $input
+     */
+    private function commissionMinor(array $input): int
+    {
+        $raw = str_replace([',', '₹', ' '], '', trim((string) ($input['commission'] ?? '')));
+
+        if ($raw === '' || ! is_numeric($raw) || (float) $raw <= 0) {
+            throw new RuntimeException('Enter the commission for this plot.');
+        }
+
+        return BookService::rupeesToMinor($raw);
     }
 
     /**

@@ -56,6 +56,7 @@ class PlotsController extends PortalController
                 'unit'            => $this->request->getPost('unit'),
                 'price_per_unit'  => $this->request->getPost('price_per_unit'),
                 'price'           => $this->request->getPost('price'),
+                'commission'      => $this->request->getPost('commission'),
                 'status'          => $status,
                 'status_remark'   => $this->request->getPost('status_remark'),
                 'by_user_id'      => $this->userId,

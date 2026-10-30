@@ -17,6 +17,11 @@
         if ($field === 'price') {
             return $plain((int) ($editing['price_minor'] ?? 0));
         }
+        if ($field === 'commission') {
+            $minor = (int) ($editing['commission_minor'] ?? 0);
+
+            return $minor > 0 ? $plain($minor) : '';
+        }
         if (array_key_exists($field, $editing) && $editing[$field] !== null) {
             return (string) $editing[$field];
         }
@@ -30,7 +35,7 @@
         <h1>Plots</h1>
     </div>
     <?php if (in_array('plots.create', $can, true)) : ?>
-        <button class="primary" type="button" data-modal="plot-modal" data-action="<?= site_url('app/plots') ?>" data-title="New plot" data-record_id="" data-project_id="<?= (int) $projectId ?>" data-plot_no="" data-block="" data-area_sqft="" data-facing="" data-unit="sqft" data-price="" data-status="available"><?= icon('plus') ?> New plot</button>
+        <button class="primary" type="button" data-modal="plot-modal" data-action="<?= site_url('app/plots') ?>" data-title="New plot" data-record_id="" data-project_id="<?= (int) $projectId ?>" data-plot_no="" data-block="" data-area_sqft="" data-facing="" data-unit="sqft" data-price="" data-commission="" data-status="available"><?= icon('plus') ?> New plot</button>
     <?php endif; ?>
     <?php if (in_array('exports.download', $can, true)) : ?>
         <a class="ghost" href="<?= site_url('app/plots/export') . ($projectId ? '?project=' . (int) $projectId : '') ?>"><?= icon('file-text') ?> Download</a>
@@ -51,7 +56,7 @@
 <?php else : ?>
     <div class="table-wrap">
         <table class="data">
-            <thead><tr><th>Project</th><th>Plot</th><th>Block</th><th>Area</th><th>Facing</th><th class="num">Price</th><th>Status</th><th></th></tr></thead>
+            <thead><tr><th>Project</th><th>Plot</th><th>Block</th><th>Area</th><th>Facing</th><th class="num">Price</th><th class="num">Commission</th><th>Status</th><th></th></tr></thead>
             <tbody>
             <?php foreach ($plots as $plot) : ?>
                 <tr>
@@ -61,10 +66,11 @@
                     <td><?= $plot['area_sqft'] !== null ? esc(rtrim(rtrim((string) $plot['area_sqft'], '0'), '.')) . ' sqft' : '—' ?></td>
                     <td><?= esc($plot['facing'] ?: '—') ?></td>
                     <td class="num"><?= esc(\App\Libraries\DeskService::money((int) $plot['price_minor'], 'INR')) ?></td>
+                    <td class="num"><?= esc(\App\Libraries\DeskService::money((int) ($plot['commission_minor'] ?? 0), 'INR')) ?></td>
                     <td><span class="badge <?= $plot['status'] === 'available' ? '' : 'mute' ?>"><?= esc($labels[$plot['status']] ?? $plot['status']) ?></span></td>
                     <td class="actions-cell">
                         <?php if (in_array('plots.update', $can, true)) : ?>
-                            <button class="ghost" type="button" data-modal="plot-modal" data-action="<?= site_url('app/plots/' . $plot['id']) ?>" data-title="Edit plot" data-record_id="<?= (int) $plot['id'] ?>" data-project_id="<?= (int) $plot['project_id'] ?>" data-plot_no="<?= esc($plot['plot_no'], 'attr') ?>" data-block="<?= esc((string) $plot['block'], 'attr') ?>" data-area_sqft="<?= esc($plot['area_sqft'] !== null ? rtrim(rtrim((string) $plot['area_sqft'], '0'), '.') : '', 'attr') ?>" data-facing="<?= esc((string) $plot['facing'], 'attr') ?>" data-price="<?= esc($plain((int) $plot['price_minor']), 'attr') ?>" data-status="<?= esc($plot['status'], 'attr') ?>"><?= icon('square-pen') ?> Edit</button>
+                            <button class="ghost" type="button" data-modal="plot-modal" data-action="<?= site_url('app/plots/' . $plot['id']) ?>" data-title="Edit plot" data-record_id="<?= (int) $plot['id'] ?>" data-project_id="<?= (int) $plot['project_id'] ?>" data-plot_no="<?= esc($plot['plot_no'], 'attr') ?>" data-block="<?= esc((string) $plot['block'], 'attr') ?>" data-area_sqft="<?= esc($plot['area_sqft'] !== null ? rtrim(rtrim((string) $plot['area_sqft'], '0'), '.') : '', 'attr') ?>" data-facing="<?= esc((string) $plot['facing'], 'attr') ?>" data-price="<?= esc($plain((int) $plot['price_minor']), 'attr') ?>" data-commission="<?= esc($plain((int) ($plot['commission_minor'] ?? 0)), 'attr') ?>" data-status="<?= esc($plot['status'], 'attr') ?>"><?= icon('square-pen') ?> Edit</button>
                         <?php endif; ?>
                         <?php if (in_array('plots.delete', $can, true)) : ?>
                             <button class="ghost" type="button" data-modal="confirm-delete" data-action="<?= site_url('app/plots/' . $plot['id'] . '/delete') ?>" data-title="Remove plot <?= esc($plot['plot_no'], 'attr') ?>?"><?= icon('trash-2') ?></button>
@@ -109,14 +115,15 @@
             </div>
             <div class="split">
                 <label>Total price (₹) <input name="price" data-field="price" inputmode="decimal" value="<?= esc($pick('price')) ?>"></label>
-                <label>Status
-                    <select name="status" data-field="status">
-                        <?php foreach ($labels as $value => $label) : ?>
-                            <option value="<?= $value ?>" <?= $pick('status', 'available') === $value ? 'selected' : '' ?>><?= $label ?></option>
-                        <?php endforeach; ?>
-                    </select>
-                </label>
+                <label>Commission (₹) <input name="commission" data-field="commission" inputmode="decimal" value="<?= esc($pick('commission')) ?>" required></label>
             </div>
+            <label>Status
+                <select name="status" data-field="status">
+                    <?php foreach ($labels as $value => $label) : ?>
+                        <option value="<?= $value ?>" <?= $pick('status', 'available') === $value ? 'selected' : '' ?>><?= $label ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </label>
             <label>Status remark <input name="status_remark" data-field="status_remark" value="<?= esc($pick('status_remark')) ?>"></label>
             <fieldset>
                 <legend>Sale credit</legend>

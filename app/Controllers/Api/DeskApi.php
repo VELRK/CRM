@@ -661,8 +661,8 @@ class DeskApi extends BaseController
             return $denied;
         }
 
-        return $this->csv('plots.csv', ['Project', 'Plot', 'Block', 'Area', 'Facing', 'Price', 'Status'], array_map(static fn (array $row): array => [
-            $row['project_name'] ?? '', $row['plot_no'], $row['block'], $row['area_sqft'], $row['facing'], ((int) $row['price_minor']) / 100, $row['status'],
+        return $this->csv('plots.csv', ['Project', 'Plot', 'Block', 'Area', 'Facing', 'Price', 'Commission', 'Status'], array_map(static fn (array $row): array => [
+            $row['project_name'] ?? '', $row['plot_no'], $row['block'], $row['area_sqft'], $row['facing'], ((int) $row['price_minor']) / 100, ((int) ($row['commission_minor'] ?? 0)) / 100, $row['status'],
         ], $this->sites->plots($this->tenant(), (int) $this->request->getGet('project'))));
     }
 
