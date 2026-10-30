@@ -2801,7 +2801,9 @@ function App() {
     const [screen, setScreen] = useState('home');
     const [setup, setSetup] = useState(() => new URLSearchParams(location.search).get('setup') || '');
     const [passwordOpen, setPasswordOpen] = useState(false);
-    const logoUrl = useCompanyLogo(company?.logo ? (company.updatedDate || 'logo') : '');
+    const [splash, setSplash] = useState(true);
+    const fetchedLogo = useCompanyLogo(company?.logo ? (company.updatedDate || 'logo') : '');
+    const logoUrl = fetchedLogo || (company?.logo !== false && window.__atriumLogo ? window.__atriumLogo : '');
     useEffect(() => {
         if (!localStorage.getItem(tokenKey)) {
             setReady(true);
@@ -2813,8 +2815,17 @@ function App() {
         if (!user) { setCompany(null); return; }
         call('/api/v1/company').then(setCompany).catch(() => {});
     }, [user]);
+    useEffect(() => {
+        const job = window.__atriumBoot || Promise.resolve();
+        job.finally(() => setSplash(false));
+    }, []);
+    useEffect(() => {
+        if (setup || (ready && !splash)) {
+            document.getElementById('boot')?.remove();
+        }
+    }, [setup, ready, splash]);
     if (setup) return html`<${SetPassword} token=${setup} onDone=${() => { history.replaceState({}, '', apiPath('/desk/')); setSetup(''); }} />`;
-    if (!ready) return html`<main class="login"><p>Opening Atrium…</p></main>`;
+    if (!ready || splash) return null;
     if (!user) return html`<${Login} onIn=${setUser} />`;
     const spec = lists[screen];
     const title = screen === 'settings' ? 'Settings' : (modules.find((item) => item[1] === screen)?.[0] || 'CRM');
@@ -2830,7 +2841,7 @@ function App() {
                 </section>`)}
             </div>
             <button class=${screen === 'settings' ? 'nav-pin active' : 'nav-pin'} type="button" onClick=${() => setScreen('settings')}>Settings</button>
-            <button class="sign-out" onClick=${() => { localStorage.removeItem(tokenKey); setUser(null); }}>Sign out</button>
+            <button class="sign-out" onClick=${() => { localStorage.removeItem(tokenKey); window.__atriumLogo = ''; setUser(null); }}>Sign out</button>
         </aside>
         <div class="workspace">
             <header class="topbar">

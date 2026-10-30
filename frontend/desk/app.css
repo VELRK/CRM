@@ -185,6 +185,8 @@ td.row-actions { margin: 0; align-items: center; }
 .heat-head b { display: block; color: var(--ink); font-size: 12px; }
 .heat-label { text-align: right; }
 button.heat-cell { height: 22px; border-radius: 4px; border: 0; padding: 0; width: 100%; cursor: pointer; }
+.heat-modal .filter-box { display: flex; flex-direction: column; max-height: calc(100vh - 48px); }
+.heat-modal .filter-body { overflow-y: auto; min-height: 0; }
 .heat-pop article { border: 1px solid #e6ebe6; border-radius: 8px; padding: 10px 12px; }
 .heat-pop strong, .heat-pop em, .heat-pop p { display: block; }
 .heat-pop em, .heat-pop p { color: var(--muted); font-style: normal; font-size: 12px; font-weight: 400; margin: 2px 0 0; }
