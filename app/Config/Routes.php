@@ -22,6 +22,10 @@ $routes->group('api/v1', ['filter' => 'apiauth'], static function ($routes) {
     $routes->post('auth/logout', 'Api\DeskApi::logout');
     $routes->get('me', 'Api\DeskApi::me');
     $routes->post('me/password', 'Api\DeskApi::changePassword');
+    $routes->get('company', 'Api\DeskApi::company');
+    $routes->post('company', 'Api\DeskApi::saveCompany');
+    $routes->get('company/logo', 'Api\DeskApi::companyLogo');
+    $routes->post('company/logo', 'Api\DeskApi::saveLogo');
 
     $routes->get('staff', 'Api\DeskApi::staff');
     $routes->get('staff/(:num)/open-work', 'Api\DeskApi::openWork/$1');

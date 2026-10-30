@@ -12,7 +12,7 @@ function apiPath(path) {
 
 const nav = [
     ['Menu', [['CRM', 'home'], ['Reports', 'reports']]],
-    ['People', [['Staff', 'staff'], ['Roles', 'roles'], ['Teams', 'teams']]],
+    ['People', [['Company', 'company'], ['Staff', 'staff'], ['Roles', 'roles'], ['Teams', 'teams']]],
     ['Sites', [['Projects', 'projects']]],
     ['Sales', [['Leads', 'leads'], ['Follow-ups', 'followups'], ['Visits', 'visits'], ['Tasks', 'tasks']]],
     ['Office', [['Attendance', 'attendance'], ['Incentives', 'incentives']]],
@@ -22,6 +22,7 @@ const modules = nav.flatMap((group) => group[1]);
 
 const col = (label, key) => ({ label, key });
 const lists = {
+    company: { path: '/api/v1/company', kind: 'company', lede: 'The company for this sign-in.', columns: [] },
     staff: { path: '/api/v1/staff', lede: 'People in this workspace. The company is the one you are signed into.', columns: [col('Name', 'name'), col('Email', 'email'), col('Phone', 'phone_number'), col('Role', 'role_name'), col('Profile', 'profile'), col('Status', 'status')], actions: ['user', 'staff-edit'] },
     roles: { path: '/api/v1/roles', lede: 'Roles for this workspace. Access is ticked on the role.', columns: [col('Role', 'name'), col('People', 'member_count'), col('Access', 'access_count')], actions: ['role', 'role-delete'] },
     teams: { path: '/api/v1/teams', lede: 'Teams and who leads them.', columns: [col('Team', 'name'), col('Head', 'head_name'), col('Members', 'members')], actions: ['team', 'team-delete'] },
@@ -57,6 +58,33 @@ async function call(path, options = {}) {
         throw new Error(payload.error || ('Request failed (' + response.status + ')'));
     }
     return payload.data !== undefined ? payload.data : payload;
+}
+function useCompanyLogo(stamp) {
+    const [url, setUrl] = useState('');
+    useEffect(() => {
+        if (!stamp) { setUrl(''); return undefined; }
+        let objectUrl = '';
+        let gone = false;
+        const token = localStorage.getItem(tokenKey);
+        fetch(apiPath('/api/v1/company/logo'), { headers: token ? { Authorization: 'Bearer ' + token } : {} })
+            .then((response) => (response.ok ? response.blob() : null))
+            .then((blob) => {
+                if (gone || !blob) return;
+                objectUrl = URL.createObjectURL(blob);
+                setUrl(objectUrl);
+            })
+            .catch(() => {});
+        return () => { gone = true; if (objectUrl) URL.revokeObjectURL(objectUrl); };
+    }, [stamp]);
+    return url;
+}
+function companyMark(company, logoUrl) {
+    if (!company) return null;
+    const letter = String(company.companyName || 'C').slice(0, 1);
+    return html`<div class="company-strip">
+        ${logoUrl ? html`<img src=${logoUrl} alt="" />` : html`<span class="brand-mark">${letter}</span>`}
+        <div><strong>${company.companyName || 'Company'}</strong><p>${[company.phone, company.address].filter(Boolean).join(' · ') || 'Set the phone, address, and logo in Company.'}</p></div>
+    </div>`;
 }
 
 function SetPassword({ token, onDone }) {
@@ -1178,6 +1206,8 @@ function dayShift(value) {
     return Math.round((then - now) / 86400000);
 }
 function ProjectForm({ project, onDone, onClose }) {
+    const [company, setCompany] = useState(null);
+    const logoUrl = useCompanyLogo(company?.logo ? company.updatedDate || 'logo' : '');
     const [form, setForm] = useState({
         name: project?.name || '',
         location: project?.location || '',
@@ -1187,6 +1217,12 @@ function ProjectForm({ project, onDone, onClose }) {
         launch_on: String(project?.launch_on || '').slice(0, 10),
     });
     const [error, setError] = useState('');
+    useEffect(() => {
+        call('/api/v1/company').then((row) => {
+            setCompany(row);
+            if (!project?.id && row?.address) setForm((current) => current.location ? current : { ...current, location: row.address });
+        }).catch(() => {});
+    }, []);
     async function submit(event) {
         event.preventDefault();
         setError('');
@@ -1197,6 +1233,7 @@ function ProjectForm({ project, onDone, onClose }) {
         } catch (e) { setError(e.message); }
     }
     return html`<${FormCard} title=${project?.id ? 'Edit project' : 'Add project'} error=${error} onSubmit=${submit} onClose=${onClose}>
+        ${companyMark(company, logoUrl)}
         ${field('Name', inputOf(form, 'name', setForm))}
         ${field('Location', inputOf(form, 'location', setForm))}
         ${field('Status', selectOf(form, 'status', setForm, [['upcoming', 'Upcoming'], ['ongoing', 'Ongoing'], ['completed', 'Completed']]))}
@@ -1218,11 +1255,14 @@ function SitesBoard({ start }) {
     const [projectForm, setProjectForm] = useState(null);
     const [confirm, setConfirm] = useState(null);
     const [listOpen, setListOpen] = useState(false);
+    const [company, setCompany] = useState(null);
+    const logoUrl = useCompanyLogo(company?.logo ? company.updatedDate || 'logo' : '');
     function load() {
         setError('');
         call('/api/v1/projects').then((rows) => setProjects(Array.isArray(rows) ? rows : [])).catch((e) => setError(e.message));
         call('/api/v1/plots').then((rows) => setPlots(Array.isArray(rows) ? rows : [])).catch((e) => setError(e.message));
         call('/api/v1/staff').then((rows) => setPeople(Array.isArray(rows) ? rows : [])).catch(() => {});
+        call('/api/v1/company').then(setCompany).catch(() => {});
     }
     useEffect(() => { load(); }, []);
     useEffect(() => { setTab(start || 'dashboard'); }, [start]);
@@ -1290,6 +1330,7 @@ function SitesBoard({ start }) {
     const phase = available[0]?.phase || available[0]?.block || rows[0]?.phase || '—';
     return html`<div class="sites">
         ${error ? html`<p class="error">${error}</p>` : null}
+        ${companyMark(company, logoUrl)}
         <div class="site-tools">
             <label>Project<select value=${projectId} onChange=${(event) => setProjectId(event.target.value)}><option value="">All projects</option>${projects.map((project) => html`<option key=${project.id} value=${String(project.id)}>${project.name}</option>`)}</select></label>
             <button class="primary" type="button" onClick=${() => setProjectForm({})}>Add project</button>
@@ -1664,7 +1705,27 @@ function Intake({ points }) {
         <polyline points=${line} fill="none" stroke="#f7b84b" strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round"/>
     </svg>`;
 }
+function hourLabel(hour) {
+    return (hour % 12 || 12) + (hour >= 12 ? ' PM' : ' AM');
+}
+function bookingSlots(visits, followups) {
+    const items = [];
+    visits.forEach((row) => {
+        const at = row.scheduled_date_time || row.scheduled_at;
+        const parts = stampParts(at);
+        if (!parts) return;
+        items.push({ key: 'v' + row.id, day: parts.day, hour: parts.hour, kind: 'Visit', title: row.lead_name || 'Visit', when: clock(at), note: [row.project_name, row.display_status || row.status].filter(Boolean).join(' · ') });
+    });
+    followups.forEach((row) => {
+        const at = row.call_scheduled_at || row.next_at;
+        const parts = stampParts(at);
+        if (!parts) return;
+        items.push({ key: 'f' + row.id, day: parts.day, hour: parts.hour, kind: 'Follow-up', title: row.lead_name || 'Follow-up', when: clock(at), note: row.body || row.followup_type || row.display_status || '' });
+    });
+    return items;
+}
 function Heatmap({ visits, followups }) {
+    const [pick, setPick] = useState(null);
     const days = [];
     for (let offset = 6; offset >= 0; offset -= 1) {
         const date = new Date();
@@ -1673,26 +1734,38 @@ function Heatmap({ visits, followups }) {
         days.push(date);
     }
     const hours = [9, 10, 11, 12, 13, 14, 15, 16, 17, 18];
+    const items = bookingSlots(visits, followups);
     const counts = {};
-    [...visits, ...followups].forEach((row) => {
-        const parts = stampParts(row.scheduled_at || row.next_at);
-        if (!parts || parts.hour < 9 || parts.hour > 18) return;
-        const key = parts.day + '-' + parts.hour;
+    items.forEach((item) => {
+        if (item.hour < 9 || item.hour > 18) return;
+        const key = item.day + '-' + item.hour;
         counts[key] = (counts[key] || 0) + 1;
     });
     const max = Math.max(1, ...Object.values(counts), 0);
     const names = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
-    return html`<div class="heat" role="img" aria-label="Visits and follow-ups by day and hour">
+    const picked = pick ? items.filter((item) => item.day === pick.day && item.hour === pick.hour) : [];
+    return html`<div>
+    <div class="heat" role="img" aria-label="Visits and follow-ups by day and hour">
         <span></span>
         ${days.map((date) => html`<span class="heat-head" key=${dayKey(date)}>${names[date.getDay()]}<b>${date.getDate()}</b></span>`)}
         ${hours.map((hour) => html`<div class="heat-row" key=${hour}>
-            <span class="heat-label">${(hour % 12 || 12) + (hour >= 12 ? ' PM' : ' AM')}</span>
+            <span class="heat-label">${hourLabel(hour)}</span>
             ${days.map((date) => {
-                const count = counts[dayKey(date) + '-' + hour] || 0;
+                const day = dayKey(date);
+                const count = counts[day + '-' + hour] || 0;
                 const tone = count === 0 ? 0 : 0.16 + (count / max) * 0.84;
-                return html`<span key=${dayKey(date) + hour} class="heat-cell" title=${count + ' booked'} style=${{ background: count ? 'rgba(31, 107, 74, ' + tone.toFixed(2) + ')' : '#f3f6f9' }}></span>`;
+                return html`<button type="button" key=${day + hour} class="heat-cell" title=${count + ' booked'} style=${{ background: count ? 'rgba(31, 107, 74, ' + tone.toFixed(2) + ')' : '#f3f6f9' }} onClick=${() => setPick({ day, hour, label: names[date.getDay()] + ' ' + date.getDate() + ' · ' + hourLabel(hour) })}></button>`;
             })}
         </div>`)}
+    </div>
+        ${pick ? html`<div class="modal-back" onClick=${() => setPick(null)}>
+            <div class="filter-box" onClick=${(event) => event.stopPropagation()}>
+                <header><h2>${pick.label}</h2><button class="filter-x" type="button" onClick=${() => setPick(null)} aria-label="Close">×</button></header>
+                <div class="filter-body heat-pop">
+                    ${picked.length === 0 ? html`<p>Nothing is booked in this hour.</p>` : picked.map((item) => html`<article key=${item.key}><strong>${item.title}</strong><em>${item.kind}${item.when ? ' · ' + item.when : ''}</em><p>${item.note || '—'}</p></article>`)}
+                </div>
+            </div>
+        </div>` : null}
     </div>`;
 }
 function Home({ onOpen }) {
@@ -1827,7 +1900,7 @@ function Home({ onOpen }) {
             <article class="panel span-12">
                 <header class="panel-head"><h2>Booking view</h2><span class="muted">Last 7 days · 9 AM to 6 PM</span></header>
                 <${Heatmap} visits=${visits} followups=${followups} />
-                <p class="muted heat-note">Each cell is a site visit or follow-up in that hour. Empty hours stay light.</p>
+                <p class="muted heat-note">Click an hour to see the visits and follow-ups booked then.</p>
             </article>
             <article class="panel table-card span-8">
                 <header class="panel-head"><h2>Leads</h2><button class="linkish" onClick=${() => onOpen('leads')}>Open list</button></header>
@@ -2446,6 +2519,66 @@ function Console() {
 const ATTEND_LABEL = { present: 'Present', late: 'Late', leave: 'Leave', absent: 'Absent' };
 const ATTEND_MARK = { present: 'P', late: 'Lt', leave: 'L', absent: 'A' };
 const ATTEND_TONE = { present: 'ok', late: 'warn', leave: 'info', absent: 'stop' };
+function CompanyBoard({ onSaved }) {
+    const [form, setForm] = useState(null);
+    const [error, setError] = useState('');
+    const [saved, setSaved] = useState('');
+    const logoUrl = useCompanyLogo(form?.logo ? form.updatedDate || 'logo' : '');
+    useEffect(() => { call('/api/v1/company').then(setForm).catch((e) => setError(e.message)); }, []);
+    const set = (key) => (event) => setForm({ ...form, [key]: event.target.value });
+    async function submit(event) {
+        event.preventDefault();
+        setError('');
+        setSaved('');
+        try {
+            const data = await call('/api/v1/company', { method: 'POST', body: { companyName: form.companyName, companyAdminName: form.companyAdminName, companyAdminEmail: form.companyAdminEmail, phone: form.phone || '', address: form.address || '' } });
+            setForm(data);
+            setSaved('Company details saved.');
+            if (onSaved) await onSaved();
+        } catch (e) { setError(e.message); }
+    }
+    async function uploadLogo(event) {
+        const file = event.target.files && event.target.files[0];
+        event.target.value = '';
+        if (!file) return;
+        setError('');
+        setSaved('');
+        try {
+            const headers = { Accept: 'application/json' };
+            const token = localStorage.getItem(tokenKey);
+            if (token) headers.Authorization = 'Bearer ' + token;
+            const body = new FormData();
+            body.append('logo', file);
+            const response = await fetch(apiPath('/api/v1/company/logo'), { method: 'POST', headers, body });
+            const payload = await response.json();
+            if (!response.ok || payload.ok === false) throw new Error(payload.error || 'The logo was not saved.');
+            setForm(payload.data);
+            setSaved('Logo updated. It shows on Add project.');
+        } catch (e) { setError(e.message); }
+    }
+    if (!form) return html`<p class="empty-line">${error || 'Opening company…'}</p>`;
+    return html`<form class="panel-card stack" onSubmit=${submit}>
+        <h3>Company</h3>
+        <p>These details and the logo are used when a site is created. The admin email is the owner sign-in.</p>
+        ${error ? html`<p class="error">${error}</p>` : null}
+        ${saved ? html`<p class="ok-line">${saved}</p>` : null}
+        <div class="company-strip">
+            ${logoUrl ? html`<img class="logo-preview" src=${logoUrl} alt="" />` : html`<span class="brand-mark">${String(form.companyName || 'C').slice(0, 1)}</span>`}
+            <label class="field">Logo<input type="file" accept="image/png,image/jpeg,image/webp" onChange=${uploadLogo} /></label>
+        </div>
+        <div class="form-grid">
+            ${field('Company name', html`<input value=${form.companyName || ''} onInput=${set('companyName')} required />`)}
+            ${field('Phone', html`<input inputMode="numeric" value=${form.phone || ''} onInput=${set('phone')} />`)}
+            ${field('Address', html`<input value=${form.address || ''} onInput=${set('address')} />`, true)}
+            ${field('Admin name', html`<input value=${form.companyAdminName || ''} onInput=${set('companyAdminName')} required />`)}
+            ${field('Admin email', html`<input type="email" value=${form.companyAdminEmail || ''} onInput=${set('companyAdminEmail')} required />`)}
+            ${field('Plan', html`<input value=${form.companyPlan || ''} readOnly />`)}
+            ${field('Max users', html`<input value=${form.maxUsers ?? ''} readOnly />`)}
+            ${field('Created', html`<input value=${form.insertedDate || ''} readOnly />`)}
+        </div>
+        <div class="row-actions"><button class="primary" type="submit">Save</button></div>
+    </form>`;
+}
 function AttendanceBoard({ user }) {
     const now = new Date();
     const [year, setYear] = useState(now.getFullYear());
@@ -2697,7 +2830,8 @@ function App() {
                 ${screen === 'whatsapp' ? html`<${WhatsAppBoard} />` : null}
                 ${spec && spec.kind === 'sites' ? html`<${SitesBoard} key=${screen} start=${spec.start} />` : null}
                 ${spec && spec.kind === 'attendance' ? html`<${AttendanceBoard} key="attendance" user=${user} />` : null}
-                ${spec && screen !== 'notifications' && screen !== 'whatsapp' && spec.kind !== 'sites' && spec.kind !== 'attendance' ? html`<${Resource} key=${screen} title=${title} lede=${spec.lede} spec=${spec} />` : null}
+                ${spec && spec.kind === 'company' ? html`<${CompanyBoard} onSaved=${async () => setUser(await call('/api/v1/me'))} />` : null}
+                ${spec && screen !== 'notifications' && screen !== 'whatsapp' && spec.kind !== 'sites' && spec.kind !== 'attendance' && spec.kind !== 'company' ? html`<${Resource} key=${screen} title=${title} lede=${spec.lede} spec=${spec} />` : null}
                 ${passwordOpen ? html`<${ChangePassword} onClose=${() => setPasswordOpen(false)} />` : null}
             </main>
         </div>

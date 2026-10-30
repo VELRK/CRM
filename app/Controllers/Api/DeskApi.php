@@ -98,6 +98,234 @@ class DeskApi extends BaseController
         return $this->ok(['revoked' => true]);
     }
 
+    public function company(): ResponseInterface
+    {
+        return $this->run(fn () => $this->companyRow());
+    }
+
+    public function saveCompany(): ResponseInterface
+    {
+        if ($denied = $this->guard('workspace.settings')) {
+            return $denied;
+        }
+
+        return $this->run(function () {
+            $this->ensureCompanyColumns();
+            $input = $this->input();
+            $name = trim((string) ($input['companyName'] ?? $input['name'] ?? ''));
+            $adminName = trim((string) ($input['companyAdminName'] ?? ''));
+            $adminEmail = strtolower(trim((string) ($input['companyAdminEmail'] ?? '')));
+
+            if ($name === '' || $adminName === '' || $adminEmail === '') {
+                throw new RuntimeException('A company needs a name, an admin name, and an admin email.');
+            }
+
+            if (! filter_var($adminEmail, FILTER_VALIDATE_EMAIL)) {
+                throw new RuntimeException('Enter a valid admin email.');
+            }
+
+            $db = db_connect();
+            $owner = $this->companyOwner();
+
+            if ($owner === null) {
+                throw new RuntimeException('This company has no owner yet.');
+            }
+
+            $taken = $db->table('users')->where('email', $adminEmail)->where('id !=', (int) $owner['id'])->countAllResults();
+
+            if ($taken > 0) {
+                throw new RuntimeException('That admin email is already used.');
+            }
+
+            $phone = preg_replace('/\D+/', '', (string) ($input['phone'] ?? '')) ?? '';
+            $address = trim((string) ($input['address'] ?? ''));
+
+            if ($phone !== '' && strlen($phone) !== 10) {
+                throw new RuntimeException('Enter a 10-digit company phone, or leave it empty.');
+            }
+
+            if (strlen($address) > 255) {
+                throw new RuntimeException('The address is too long.');
+            }
+
+            $now = date('Y-m-d H:i:s');
+            $db->table('tenants')->where('id', $this->tenant())->update([
+                'name'       => $name,
+                'phone'      => $phone === '' ? null : $phone,
+                'address'    => $address === '' ? null : $address,
+                'updated_at' => $now,
+            ]);
+            $db->table('users')->where('id', (int) $owner['id'])->update([
+                'name'       => $adminName,
+                'email'      => $adminEmail,
+                'updated_at' => $now,
+            ]);
+
+            return $this->ok($this->companyRow());
+        });
+    }
+
+    public function companyLogo(): ResponseInterface
+    {
+        $path = $this->logoPath();
+
+        if ($path === null) {
+            return $this->fail('This company has no logo yet.', 404);
+        }
+
+        $mime = match (strtolower(pathinfo($path, PATHINFO_EXTENSION))) {
+            'png' => 'image/png',
+            'webp' => 'image/webp',
+            default => 'image/jpeg',
+        };
+
+        return $this->response->setHeader('Content-Type', $mime)->setHeader('Cache-Control', 'private, max-age=60')->setBody((string) file_get_contents($path));
+    }
+
+    public function saveLogo(): ResponseInterface
+    {
+        if ($denied = $this->guard('workspace.settings')) {
+            return $denied;
+        }
+
+        return $this->run(function () {
+            $this->ensureCompanyColumns();
+            $file = $this->request->getFile('logo');
+
+            if ($file === null || ! $file->isValid()) {
+                throw new RuntimeException('Choose a logo image.');
+            }
+
+            $ext = strtolower($file->getExtension() ?: '');
+            $ext = $ext === 'jpeg' ? 'jpg' : $ext;
+
+            if (! in_array($ext, ['png', 'jpg', 'webp'], true)) {
+                throw new RuntimeException('Use a PNG, JPG, or WebP logo.');
+            }
+
+            if ((int) $file->getSize() < 1 || (int) $file->getSize() > 2 * 1024 * 1024) {
+                throw new RuntimeException('Use a logo up to 2 MB.');
+            }
+
+            $dir = WRITEPATH . 'uploads' . DIRECTORY_SEPARATOR . $this->tenant();
+
+            if (! is_dir($dir) && ! mkdir($dir, 0755, true) && ! is_dir($dir)) {
+                throw new RuntimeException('The file store is not available.');
+            }
+
+            foreach (['png', 'jpg', 'webp'] as $old) {
+                $previous = $dir . DIRECTORY_SEPARATOR . 'company-logo.' . $old;
+
+                if (is_file($previous)) {
+                    unlink($previous);
+                }
+            }
+
+            $stored = 'company-logo.' . $ext;
+            $file->move($dir, $stored, true);
+            db_connect()->table('tenants')->where('id', $this->tenant())->update([
+                'logo'       => $stored,
+                'updated_at' => date('Y-m-d H:i:s'),
+            ]);
+
+            return $this->companyRow();
+        });
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function companyRow(): array
+    {
+        $this->ensureCompanyColumns();
+        $tenant = db_connect()->table('tenants')->where('id', $this->tenant())->where('deleted_at', null)->get()->getRowArray();
+
+        if ($tenant === null) {
+            throw new RuntimeException('This company is not available.');
+        }
+
+        $owner = $this->companyOwner();
+        $plan = (string) ($tenant['plan_code'] ?? 'starter');
+
+        return [
+            'companyName'       => (string) ($tenant['name'] ?? ''),
+            'companyAdminName'  => (string) ($owner['name'] ?? ''),
+            'companyAdminEmail' => (string) ($owner['email'] ?? ''),
+            'companyPlan'       => $plan,
+            'maxUsers'          => AccessCatalog::USER_CAPS[$plan] ?? AccessCatalog::USER_CAPS['starter'],
+            'expiryDate'        => null,
+            'phone'             => (string) ($tenant['phone'] ?? ''),
+            'address'           => (string) ($tenant['address'] ?? ''),
+            'logo'              => $this->logoPath() !== null,
+            'insertedDate'      => $tenant['created_at'] ?? null,
+            'updatedDate'       => $tenant['updated_at'] ?? null,
+        ];
+    }
+
+    private bool $companyColumnsReady = false;
+
+    private function ensureCompanyColumns(): void
+    {
+        if ($this->companyColumnsReady) {
+            return;
+        }
+
+        $db = db_connect();
+        $columns = [];
+
+        if (! $db->fieldExists('phone', 'tenants')) {
+            $columns['phone'] = ['type' => 'VARCHAR', 'constraint' => 40, 'null' => true];
+        }
+
+        if (! $db->fieldExists('address', 'tenants')) {
+            $columns['address'] = ['type' => 'VARCHAR', 'constraint' => 255, 'null' => true];
+        }
+
+        if (! $db->fieldExists('logo', 'tenants')) {
+            $columns['logo'] = ['type' => 'VARCHAR', 'constraint' => 64, 'null' => true];
+        }
+
+        if ($columns !== []) {
+            \Config\Database::forge()->addColumn('tenants', $columns);
+            $db->resetDataCache();
+        }
+
+        $this->companyColumnsReady = true;
+    }
+
+    private function logoPath(): ?string
+    {
+        $this->ensureCompanyColumns();
+        $tenant = db_connect()->table('tenants')->select('logo')->where('id', $this->tenant())->get()->getRowArray();
+        $name = (string) ($tenant['logo'] ?? '');
+
+        if (! preg_match('/^company-logo\.(png|jpg|webp)$/', $name)) {
+            return null;
+        }
+
+        $path = WRITEPATH . 'uploads' . DIRECTORY_SEPARATOR . $this->tenant() . DIRECTORY_SEPARATOR . $name;
+
+        return is_file($path) ? $path : null;
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function companyOwner(): ?array
+    {
+        $row = db_connect()->table('tenant_users tu')
+            ->select('u.id, u.name, u.email')
+            ->join('users u', 'u.id = tu.user_id')
+            ->join('roles r', 'r.id = tu.role_id')
+            ->where('tu.tenant_id', $this->tenant())
+            ->where('r.is_owner', 1)
+            ->where('u.deleted_at', null)
+            ->get()
+            ->getRowArray();
+
+        return $row === null ? null : $row;
+    }
+
     public function me(): ResponseInterface
     {
         $actor = $this->actor();
