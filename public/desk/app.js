@@ -12,17 +12,18 @@ function apiPath(path) {
 
 const nav = [
     ['Menu', [['CRM', 'home'], ['Reports', 'reports']]],
-    ['People', [['Company', 'company'], ['Staff', 'staff'], ['Roles', 'roles'], ['Teams', 'teams']]],
+    ['People', [['Staff', 'staff'], ['Roles', 'roles'], ['Teams', 'teams']]],
     ['Sites', [['Projects', 'projects']]],
     ['Sales', [['Leads', 'leads'], ['Follow-ups', 'followups'], ['Visits', 'visits'], ['Tasks', 'tasks']]],
     ['Office', [['Attendance', 'attendance'], ['Incentives', 'incentives']]],
     ['Insight', [['Activity', 'activity'], ['Notifications', 'notifications'], ['WhatsApp', 'whatsapp'], ['API console', 'api']]],
+    ['Settings', [['Settings', 'settings']]],
 ];
 const modules = nav.flatMap((group) => group[1]);
 
 const col = (label, key) => ({ label, key });
 const lists = {
-    company: { path: '/api/v1/company', kind: 'company', lede: 'The company for this sign-in.', columns: [] },
+    settings: { path: '/api/v1/company', kind: 'company', lede: 'Company name, email, address, and logo.', columns: [] },
     staff: { path: '/api/v1/staff', lede: 'People in this workspace. The company is the one you are signed into.', columns: [col('Name', 'name'), col('Email', 'email'), col('Phone', 'phone_number'), col('Role', 'role_name'), col('Profile', 'profile'), col('Status', 'status')], actions: ['user', 'staff-edit'] },
     roles: { path: '/api/v1/roles', lede: 'Roles for this workspace. Access is ticked on the role.', columns: [col('Role', 'name'), col('People', 'member_count'), col('Access', 'access_count')], actions: ['role', 'role-delete'] },
     teams: { path: '/api/v1/teams', lede: 'Teams and who leads them.', columns: [col('Team', 'name'), col('Head', 'head_name'), col('Members', 'members')], actions: ['team', 'team-delete'] },
@@ -83,7 +84,7 @@ function companyMark(company, logoUrl) {
     const letter = String(company.companyName || 'C').slice(0, 1);
     return html`<div class="company-strip">
         ${logoUrl ? html`<img src=${logoUrl} alt="" />` : html`<span class="brand-mark">${letter}</span>`}
-        <div><strong>${company.companyName || 'Company'}</strong><p>${[company.phone, company.address].filter(Boolean).join(' · ') || 'Set the phone, address, and logo in Company.'}</p></div>
+        <div><strong>${company.companyName || 'Company'}</strong><p>${[company.companyAdminEmail, company.phone, company.address].filter(Boolean).join(' · ') || 'Set the name, email, address, and logo in Settings.'}</p></div>
     </div>`;
 }
 
@@ -2533,7 +2534,7 @@ function CompanyBoard({ onSaved }) {
         try {
             const data = await call('/api/v1/company', { method: 'POST', body: { companyName: form.companyName, companyAdminName: form.companyAdminName, companyAdminEmail: form.companyAdminEmail, phone: form.phone || '', address: form.address || '' } });
             setForm(data);
-            setSaved('Company details saved.');
+            setSaved('Settings saved.');
             if (onSaved) await onSaved();
         } catch (e) { setError(e.message); }
     }
@@ -2553,13 +2554,13 @@ function CompanyBoard({ onSaved }) {
             const payload = await response.json();
             if (!response.ok || payload.ok === false) throw new Error(payload.error || 'The logo was not saved.');
             setForm(payload.data);
-            setSaved('Logo updated. It shows on Add project.');
+            setSaved('Logo updated.');
         } catch (e) { setError(e.message); }
     }
-    if (!form) return html`<p class="empty-line">${error || 'Opening company…'}</p>`;
+    if (!form) return html`<p class="empty-line">${error || 'Opening settings…'}</p>`;
     return html`<form class="panel-card stack" onSubmit=${submit}>
-        <h3>Company</h3>
-        <p>These details and the logo are used when a site is created. The admin email is the owner sign-in.</p>
+        <h3>Basic settings</h3>
+        <p>Change the company name, email, phone, address, and logo. The email is also the owner sign-in. These details show when a site is created.</p>
         ${error ? html`<p class="error">${error}</p>` : null}
         ${saved ? html`<p class="ok-line">${saved}</p>` : null}
         <div class="company-strip">
@@ -2568,10 +2569,10 @@ function CompanyBoard({ onSaved }) {
         </div>
         <div class="form-grid">
             ${field('Company name', html`<input value=${form.companyName || ''} onInput=${set('companyName')} required />`)}
+            ${field('Email', html`<input type="email" value=${form.companyAdminEmail || ''} onInput=${set('companyAdminEmail')} required />`)}
             ${field('Phone', html`<input inputMode="numeric" value=${form.phone || ''} onInput=${set('phone')} />`)}
             ${field('Address', html`<input value=${form.address || ''} onInput=${set('address')} />`, true)}
-            ${field('Admin name', html`<input value=${form.companyAdminName || ''} onInput=${set('companyAdminName')} required />`)}
-            ${field('Admin email', html`<input type="email" value=${form.companyAdminEmail || ''} onInput=${set('companyAdminEmail')} required />`)}
+            ${field('Contact name', html`<input value=${form.companyAdminName || ''} onInput=${set('companyAdminName')} required />`)}
             ${field('Plan', html`<input value=${form.companyPlan || ''} readOnly />`)}
             ${field('Max users', html`<input value=${form.maxUsers ?? ''} readOnly />`)}
             ${field('Created', html`<input value=${form.insertedDate || ''} readOnly />`)}
