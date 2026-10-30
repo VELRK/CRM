@@ -1043,7 +1043,7 @@ class SiteService
     public function followups(int $tenantId): array
     {
         $rows = $this->db->table('followups f')
-            ->select('f.*, l.name AS lead_name, IFNULL(l.phone_number, l.phone) AS lead_phone, u.name AS user_name, a.name AS assigned_name, b.name AS assigned_by_name', false)
+            ->select('f.*, l.name AS lead_name, IFNULL(l.phone_number, l.phone) AS lead_phone, l.lead_stage, l.lead_source, l.campaign_source, l.project_name, u.name AS user_name, a.name AS assigned_name, b.name AS assigned_by_name', false)
             ->join('leads l', 'l.id = f.lead_id')
             ->join('users u', 'u.id = f.user_id', 'left')
             ->join('users a', 'a.id = f.assigned_to', 'left')
@@ -1186,7 +1186,7 @@ class SiteService
     public function tasks(int $tenantId): array
     {
         $rows = $this->db->table('lead_tasks t')
-            ->select('t.*, l.name AS lead_name, IFNULL(l.phone_number, l.phone) AS lead_phone, a.name AS assigned_name, b.name AS assigned_by_name', false)
+            ->select('t.*, l.name AS lead_name, IFNULL(l.phone_number, l.phone) AS lead_phone, l.lead_stage, l.lead_source, l.campaign_source, l.project_name, a.name AS assigned_name, b.name AS assigned_by_name', false)
             ->join('leads l', 'l.id = t.lead_id')
             ->join('users a', 'a.id = t.assigned_to', 'left')
             ->join('users b', 'b.id = t.assigned_by', 'left')
@@ -1292,7 +1292,7 @@ class SiteService
     public function visits(int $tenantId): array
     {
         $rows = $this->db->table('site_visits v')
-            ->select('v.*, l.name AS lead_name, IFNULL(l.phone_number, l.phone) AS lead_phone, u.name AS staff_name, b.name AS assigned_by_name, pr.name AS project_name, p.plot_no', false)
+            ->select('v.*, l.name AS lead_name, IFNULL(l.phone_number, l.phone) AS lead_phone, l.lead_stage, l.lead_source, l.campaign_source, u.name AS staff_name, b.name AS assigned_by_name, pr.name AS project_name, p.plot_no', false)
             ->join('leads l', 'l.id = v.lead_id')
             ->join('users u', 'u.id = v.staff_id', 'left')
             ->join('users b', 'b.id = v.assigned_by', 'left')

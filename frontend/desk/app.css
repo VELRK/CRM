@@ -603,3 +603,7 @@ tr.active td, tr.picked td, tr.active:hover td, tr.picked:hover td { background:
 .facing-pills > div:nth-child(4n+3) { border-top: 3px solid #F59E0B; }
 .facing-pills > div:nth-child(4n) { border-top: 3px solid #7C3AED; }
 .status-funnel i { background: #0E8A4A; }
+.time-cell { font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.time-cell.in { color: #047857; }
+.time-cell.out { color: #1D4ED8; }
+.attend .table-card { max-height: calc(100vh - 240px); }

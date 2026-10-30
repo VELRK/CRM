@@ -16,7 +16,7 @@ const nav = [
     ['People', [['Staff', 'staff'], ['Roles', 'roles'], ['Teams', 'teams']]],
     ['Sites', [['Projects', 'projects']]],
     ['Sales', [['Leads', 'leads'], ['Follow-ups', 'followups'], ['Visits', 'visits'], ['Tasks', 'tasks']]],
-    ['Office', [['Attendance', 'attendance'], ['Incentives', 'incentives']]],
+    ['Office', [['Attendance', 'attendance'], ['Locations', 'locations'], ['Location categories', 'location-categories'], ['Incentives', 'incentives']]],
     ['Insight', [['Activity', 'activity'], ['Notifications', 'notifications'], ['WhatsApp', 'whatsapp'], ['API console', 'api']]],
 ];
 const modules = nav.flatMap((group) => group[1]);
@@ -34,6 +34,8 @@ const lists = {
     visits: { path: '/api/v1/visits', kind: 'visits', lede: '', columns: [], actions: ['visit'] },
     tasks: { path: '/api/v1/tasks', kind: 'tasks', lede: '', columns: [], actions: ['task'] },
     attendance: { path: '/api/v1/attendance', kind: 'attendance', lede: '', columns: [] },
+    locations: { path: '/api/v1/attendance/locations', kind: 'locations', lede: '', columns: [] },
+    'location-categories': { path: '/api/v1/attendance/categories', kind: 'location-categories', lede: '', columns: [] },
     incentives: { path: '/api/v1/incentives', lede: 'Commission rows and what is still pending.', columns: [col('User', 'user_name'), col('Project', 'project_name'), col('Plot', 'plot_no'), col('Status', 'status'), col('Amount', 'amount_minor')] },
     activity: { path: '/api/v1/activity', lede: 'What changed in this workspace.', columns: [col('When', 'created_at'), col('Person', 'user_name'), col('Action', 'action'), col('Record', 'subject_type'), col('Id', 'subject_id'), col('Detail', 'detail')] },
     notifications: { path: '/api/v1/notifications', lede: 'Messages for this sign-in.', columns: [col('Title', 'title'), col('Message', 'body'), col('Read', 'read_at')] },
@@ -2755,18 +2757,21 @@ function MapPick({ lat, lng, onPick }) {
 function blankPlace() {
     return { id: 0, name: '', category_id: '', category_name: '', address: '', latitude: '', longitude: '', radius_metres: '', work_start: '', work_end: '', accuracy_metres: '', status: 'active', entity_type: '', entity_id: '', user_ids: [] };
 }
-function LocationDesk() {
+function useCanCorrect() {
+    const [allowed, setAllowed] = useState(false);
+    useEffect(() => {
+        call('/api/v1/me').then((me) => setAllowed((me.permissions || []).includes('attendance.correct'))).catch(() => {});
+    }, []);
+    return allowed;
+}
+function CategoryBoard() {
+    const canCorrect = useCanCorrect();
     const [categories, setCategories] = useState([]);
-    const [places, setPlaces] = useState([]);
-    const [projects, setProjects] = useState([]);
     const [categoryName, setCategoryName] = useState('');
-    const [editing, setEditing] = useState(null);
     const [error, setError] = useState('');
     function load() {
         setError('');
         call('/api/v1/attendance/categories').then((rows) => setCategories(Array.isArray(rows) ? rows : [])).catch((e) => setError(e.message));
-        call('/api/v1/attendance/locations').then((rows) => setPlaces(Array.isArray(rows) ? rows : [])).catch((e) => setError(e.message));
-        call('/api/v1/projects').then((rows) => setProjects(Array.isArray(rows) ? rows : [])).catch(() => {});
     }
     useEffect(() => { load(); }, []);
     async function saveCategory(event) {
@@ -2785,29 +2790,59 @@ function LocationDesk() {
             load();
         } catch (e) { setError(e.message); }
     }
-    return html`<section class="panel-card stack">
-        <h3>Attendance locations</h3>
-        <p class="lede">Add a category, then a place. Link it to a project when it belongs to one. Anyone who can mark attendance can check in there.</p>
+    return html`<div class="sites">
         ${error ? html`<p class="error">${error}</p>` : null}
-        <form class="site-tools" onSubmit=${saveCategory}>
-            <label>Category<input value=${categoryName} onInput=${(event) => setCategoryName(event.target.value)} placeholder="Category name" required /></label>
-            <button class="primary" type="submit">Add category</button>
-        </form>
-        <div class="place-list">${categories.length === 0 ? html`<p class="empty-line">No categories yet.</p>` : categories.map((row) => html`<article key=${row.id} class="place-card"><strong>${row.name}</strong><span class=${'tag ' + (row.status === 'active' ? 'ok' : 'muted')}>${row.status === 'active' ? 'Active' : 'Inactive'}</span>${actIcon('update', row.status === 'active' ? 'Deactivate' : 'Activate', () => toggleCategory(row))}</article>`)}</div>
-        <div class="row-actions"><button class="primary" type="button" onClick=${() => setEditing(blankPlace())}>Add location</button></div>
-        <div class="table-card"><table class="board-table"><thead><tr><th>Location</th><th>Category</th><th>Linked record</th><th>Radius</th><th>Hours</th><th>Status</th><th></th></tr></thead><tbody>
-            ${places.length === 0 ? html`<tr><td colSpan="7">No attendance locations yet.</td></tr>` : places.map((row) => html`<tr key=${row.id}>
-                <td>${row.name}</td>
-                <td>${row.category_name || '—'}</td>
-                <td>${row.entity_name || '—'}</td>
-                <td>${row.radius_metres} m</td>
-                <td>${row.work_start && row.work_end ? row.work_start + '–' + row.work_end : '—'}</td>
-                <td>${row.status === 'active' ? 'Active' : 'Inactive'}</td>
-                <td class="row-actions">${actIcon('edit', 'Edit', () => setEditing({ ...blankPlace(), ...row, category_id: String(row.category_id || ''), entity_id: row.entity_type === 'project' && row.entity_id ? String(row.entity_id) : '', entity_type: row.entity_type || '', accuracy_metres: row.accuracy_metres == null ? '' : String(row.accuracy_metres), radius_metres: String(row.radius_metres || ''), user_ids: row.user_ids || [] }))}</td>
-            </tr>`)}
-        </tbody></table></div>
+        <section class="panel-card">
+            <div class="card-head"><div><h3>Location categories</h3><p>Name the kinds of places in this workspace, then add the places under Locations.</p></div></div>
+            ${canCorrect ? html`<form class="site-tools" onSubmit=${saveCategory}>
+                <label>Category<input value=${categoryName} onInput=${(event) => setCategoryName(event.target.value)} placeholder="Category name" required /></label>
+                <button class="primary" type="submit">Add category</button>
+            </form>` : html`<p class="lede">You can view categories. An admin can add or change them.</p>`}
+            <div class="table-card"><table class="board-table"><thead><tr><th>Category</th><th>Status</th>${canCorrect ? html`<th></th>` : null}</tr></thead><tbody>
+                ${categories.length === 0 ? html`<tr><td colSpan=${canCorrect ? 3 : 2}>No categories yet.</td></tr>` : categories.map((row) => html`<tr key=${row.id}>
+                    <td><strong>${row.name}</strong></td>
+                    <td><span class=${'tag ' + (row.status === 'active' ? 'ok' : 'muted')}>${row.status === 'active' ? 'Active' : 'Inactive'}</span></td>
+                    ${canCorrect ? html`<td class="row-actions">${actIcon('update', row.status === 'active' ? 'Deactivate' : 'Activate', () => toggleCategory(row))}</td>` : null}
+                </tr>`)}
+            </tbody></table></div>
+        </section>
+    </div>`;
+}
+function LocationBoard() {
+    const canCorrect = useCanCorrect();
+    const [categories, setCategories] = useState([]);
+    const [places, setPlaces] = useState([]);
+    const [projects, setProjects] = useState([]);
+    const [editing, setEditing] = useState(null);
+    const [error, setError] = useState('');
+    function load() {
+        setError('');
+        call('/api/v1/attendance/categories').then((rows) => setCategories(Array.isArray(rows) ? rows : [])).catch((e) => setError(e.message));
+        call('/api/v1/attendance/locations').then((rows) => setPlaces(Array.isArray(rows) ? rows : [])).catch((e) => setError(e.message));
+        call('/api/v1/projects').then((rows) => setProjects(Array.isArray(rows) ? rows : [])).catch(() => {});
+    }
+    useEffect(() => { load(); }, []);
+    return html`<div class="sites">
+        ${error ? html`<p class="error">${error}</p>` : null}
+        <section class="panel-card">
+            <div class="card-head">
+                <div><h3>Locations</h3><p>Anyone who can mark attendance can check in at an active place, inside its radius.</p></div>
+                ${canCorrect ? html`<button class="primary" type="button" onClick=${() => setEditing(blankPlace())}>Add location</button>` : null}
+            </div>
+            <div class="table-card"><table class="board-table"><thead><tr><th>Location</th><th>Category</th><th>Linked record</th><th>Radius</th><th>Hours</th><th>Status</th>${canCorrect ? html`<th></th>` : null}</tr></thead><tbody>
+                ${places.length === 0 ? html`<tr><td colSpan=${canCorrect ? 7 : 6}>No locations yet. Add a category first, then a place.</td></tr>` : places.map((row) => html`<tr key=${row.id}>
+                    <td><strong>${row.name}</strong></td>
+                    <td>${row.category_name || '—'}</td>
+                    <td>${row.entity_name || '—'}</td>
+                    <td>${row.radius_metres} m</td>
+                    <td>${row.work_start && row.work_end ? row.work_start + '–' + row.work_end : '—'}</td>
+                    <td><span class=${'tag ' + (row.status === 'active' ? 'ok' : 'muted')}>${row.status === 'active' ? 'Active' : 'Inactive'}</span></td>
+                    ${canCorrect ? html`<td class="row-actions">${actIcon('edit', 'Edit', () => setEditing({ ...blankPlace(), ...row, category_id: String(row.category_id || ''), entity_id: row.entity_type === 'project' && row.entity_id ? String(row.entity_id) : '', entity_type: row.entity_type || '', accuracy_metres: row.accuracy_metres == null ? '' : String(row.accuracy_metres), radius_metres: String(row.radius_metres || ''), user_ids: row.user_ids || [] }))}</td>` : null}
+                </tr>`)}
+            </tbody></table></div>
+        </section>
         ${editing ? html`<${LocationForm} place=${editing} categories=${categories} projects=${projects} onDone=${() => { setEditing(null); load(); }} onClose=${() => setEditing(null)} />` : null}
-    </section>`;
+    </div>`;
 }
 function LocationForm({ place, categories, projects, onDone, onClose }) {
     const [form, setForm] = useState(place);
@@ -2862,10 +2897,9 @@ function LocationForm({ place, categories, projects, onDone, onClose }) {
 }
 function AttendanceBoard({ user }) {
     const now = new Date();
-    const [year, setYear] = useState(now.getFullYear());
-    const [month, setMonth] = useState(now.getMonth() + 1);
+    const today = dayKey(now);
+    const [date, setDate] = useState(today);
     const [rows, setRows] = useState([]);
-    const [todayRows, setTodayRows] = useState([]);
     const [people, setPeople] = useState([]);
     const [error, setError] = useState('');
     const [marking, setMarking] = useState(null);
@@ -2873,109 +2907,102 @@ function AttendanceBoard({ user }) {
     const [teamId, setTeamId] = useState('');
     const [area, setArea] = useState(null);
     const [sessions, setSessions] = useState([]);
-    const [showPlaces, setShowPlaces] = useState(false);
     const [permissions, setPermissions] = useState(user.permissions || []);
     useEffect(() => { call('/api/v1/me').then((me) => setPermissions(me.permissions || [])).catch(() => {}); }, []);
     const canCorrect = permissions.includes('attendance.correct');
     const canMark = permissions.includes('attendance.mark') || canCorrect;
-    const today = dayKey(now);
     function load() {
         setError('');
-        const key = year + '-' + String(month).padStart(2, '0');
-        const todayKey = today.slice(0, 7);
-        call('/api/v1/attendance?month=' + encodeURIComponent(key)).then((data) => setRows(Array.isArray(data) ? data : [])).catch((e) => setError(e.message));
-        if (todayKey === key) {
-            call('/api/v1/attendance?month=' + encodeURIComponent(todayKey)).then((data) => setTodayRows(Array.isArray(data) ? data : [])).catch(() => {});
-        } else {
-            call('/api/v1/attendance?month=' + encodeURIComponent(todayKey)).then((data) => setTodayRows(Array.isArray(data) ? data : [])).catch(() => {});
-        }
+        const month = String(date).slice(0, 7);
+        call('/api/v1/attendance?month=' + encodeURIComponent(month)).then((data) => setRows(Array.isArray(data) ? data : [])).catch((e) => setError(e.message));
         call('/api/v1/staff').then((data) => setPeople(Array.isArray(data) ? data : [])).catch(() => {});
         call('/api/v1/teams').then((data) => setTeams(Array.isArray(data) ? data : [])).catch(() => {});
         call('/api/v1/company').then((data) => setArea(data)).catch(() => {});
-        call('/api/v1/attendance/sessions?date=' + today).then((data) => setSessions(Array.isArray(data) ? data : [])).catch(() => {});
+        call('/api/v1/attendance/sessions?date=' + encodeURIComponent(date)).then((data) => setSessions(Array.isArray(data) ? data : [])).catch(() => {});
     }
-    useEffect(() => { load(); }, [year, month]);
+    useEffect(() => { load(); }, [date]);
     const staff = people.filter((person) => person.status !== 'inactive' && person.status !== 'relieved' && String(person.attendance_applicable) !== '0' && (!teamId || String(person.team_id || '') === String(teamId)));
-    const days = new Date(year, month, 0).getDate();
-    const byPerson = {};
+    const marks = {};
     rows.forEach((row) => {
-        const id = String(row.user_id);
-        if (!byPerson[id]) byPerson[id] = {};
-        byPerson[id][String(row.work_date).slice(0, 10)] = row;
+        if (String(row.work_date).slice(0, 10) === date) marks[String(row.user_id)] = row;
     });
-    const todayMap = {};
-    todayRows.forEach((row) => {
-        if (String(row.work_date).slice(0, 10) === today) todayMap[String(row.user_id)] = row;
+    const lines = [];
+    staff.forEach((person) => {
+        const mine = sessions.filter((row) => String(row.user_id) === String(person.user_id) && String(row.work_date).slice(0, 10) === date);
+        if (mine.length === 0) {
+            lines.push({ key: String(person.user_id), person, session: null, mark: marks[String(person.user_id)] || null });
+            return;
+        }
+        mine.forEach((session) => lines.push({ key: person.user_id + '-' + session.id, person, session, mark: marks[String(person.user_id)] || null }));
     });
-    const years = [now.getFullYear() - 1, now.getFullYear(), now.getFullYear() + 1];
-    const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-    function openMark(person, date) {
+    function canTouch(person) {
+        return canMark && (canCorrect || String(person.user_id) === String(user.id));
+    }
+    function openMark(person, session) {
         if (!canMark) { setError('This sign-in cannot mark attendance.'); return; }
         if (!canCorrect && String(person.user_id) !== String(user.id)) { setError('You can mark only your own attendance.'); return; }
-        const existing = (byPerson[String(person.user_id)] || {})[date] || (date === today ? todayMap[String(person.user_id)] : null);
-        setMarking({ person, date, status: existing?.status || 'present', action: existing?.check_in && !existing?.check_out ? 'out' : 'in', note: existing?.note || '', self: String(person.user_id) === String(user.id) });
+        const existing = marks[String(person.user_id)] || null;
+        const open = session ? session.check_status === 'open' : !!(existing?.check_in && !existing?.check_out);
+        setMarking({ person, date, status: session?.status || existing?.status || 'present', action: open ? 'out' : 'in', note: existing?.note || '', self: String(person.user_id) === String(user.id), locationId: session?.location_id ? String(session.location_id) : '' });
+    }
+    function timeText(value) {
+        return value ? clock(value) : '—';
     }
     return html`<div class="sites attend">
         ${error ? html`<p class="error">${error}</p>` : null}
         <div class="site-tools">
-            <label>Year<select value=${String(year)} onChange=${(event) => setYear(Number(event.target.value))}>${years.map((value) => html`<option key=${value} value=${String(value)}>${value}</option>`)}</select></label>
-            <label>Month<select value=${String(month)} onChange=${(event) => setMonth(Number(event.target.value))}>${months.map((label, index) => html`<option key=${label} value=${String(index + 1)}>${label}</option>`)}</select></label>
+            <label>Date<input type="date" value=${date} onChange=${(event) => event.target.value && setDate(event.target.value)} /></label>
             <label>Team<select value=${teamId} onChange=${(event) => setTeamId(event.target.value)}><option value="">All teams</option>${teams.map((team) => html`<option key=${team.id} value=${String(team.id)}>${team.name}</option>`)}</select></label>
-            <button class="ghost" type="button" onClick=${() => { setYear(now.getFullYear()); setMonth(now.getMonth() + 1); }}>Today</button>
+            <button class="ghost" type="button" onClick=${() => setDate(today)}>Today</button>
             <button class="ghost" type="button" onClick=${() => {
                 const teamName = Object.fromEntries(teams.map((team) => [String(team.id), team.name]));
-                const allowed = new Set(staff.map((person) => String(person.user_id)));
-                downloadSheet('Attendance ' + months[month - 1] + ' ' + year, ['User', 'Team', 'Date', 'Status', 'Check in', 'Check out', 'Sessions'], rows.filter((row) => allowed.has(String(row.user_id))).map((row) => {
-                    const person = staff.find((item) => String(item.user_id) === String(row.user_id));
-                    return [row.user_name || person?.name || '', teamName[String(person?.team_id || '')] || '', String(row.work_date || '').slice(0, 10), ATTEND_LABEL[row.status] || row.status || '', row.check_in ? clock(row.check_in) : '', row.check_out ? clock(row.check_out) : '', row.session_count || 0];
-                }));
+                downloadSheet('Attendance ' + date, ['Location', 'Category', 'User', 'Team', 'Check in', 'Check out', 'Status'], lines.map((line) => [
+                    line.session?.location_name || line.session?.check_in_place || '',
+                    line.session?.category_name || '',
+                    line.person.name || '',
+                    teamName[String(line.person.team_id || '')] || '',
+                    line.session?.check_in ? clock(line.session.check_in) : (line.mark?.check_in ? clock(line.mark.check_in) : ''),
+                    line.session?.check_out ? clock(line.session.check_out) : (line.mark?.check_out ? clock(line.mark.check_out) : ''),
+                    ATTEND_LABEL[line.session?.status || line.mark?.status] || '',
+                ]));
             }}>Download</button>
-            ${canCorrect ? html`<button class="ghost" type="button" onClick=${() => setShowPlaces(!showPlaces)}>${showPlaces ? 'Hide locations' : 'Locations'}</button>` : null}
-            ${canMark ? html`<button class="primary" type="button" onClick=${() => { const person = staff.find((row) => String(row.user_id) === String(user.id)) || (canCorrect ? staff[0] : null); if (person) openMark(person, today); else setError('No staff row is available to mark.'); }}>Mark attendance</button>` : null}
+            ${canMark ? html`<button class="primary" type="button" onClick=${() => { const person = staff.find((row) => String(row.user_id) === String(user.id)) || (canCorrect ? staff[0] : null); if (person) openMark(person, null); else setError('No staff row is available to mark.'); }}>Mark attendance</button>` : null}
         </div>
-        ${showPlaces ? html`<${LocationDesk} />` : null}
-        <div class="attend-layout">
-            <section class="panel-card">
-                <h3>${months[month - 1]} ${year}</h3>
-                <p>Each letter is that person’s mark. P present, Lt late, L leave, A absent.</p>
-                <div class="table-card attend-sheet"><table class="board-table"><thead><tr>
-                    <th>User</th>
-                    ${Array.from({ length: days }, (_, index) => html`<th key=${index} class=${year === now.getFullYear() && month === now.getMonth() + 1 && index + 1 === now.getDate() ? 'today-col' : ''}>${index + 1}</th>`)}
-                </tr></thead><tbody>
-                    ${staff.map((person) => html`<tr key=${person.user_id}>
-                        <td class="attend-name"><strong>${person.name}</strong><em>${person.role_name || person.profile || ''}</em></td>
-                        ${Array.from({ length: days }, (_, index) => {
-                            const date = year + '-' + String(month).padStart(2, '0') + '-' + String(index + 1).padStart(2, '0');
-                            const mark = (byPerson[String(person.user_id)] || {})[date];
-                            const letter = mark ? (ATTEND_MARK[mark.status] || '·') : '';
-                            return html`<td key=${date} class=${year === now.getFullYear() && month === now.getMonth() + 1 && index + 1 === now.getDate() ? 'today-col' : ''}><button type="button" class=${'day-mark ' + (mark ? ATTEND_TONE[mark.status] || '' : '')} onClick=${() => openMark(person, date)}>${letter}</button></td>`;
-                        })}
-                    </tr>`)}
-                </tbody></table></div>
-            </section>
-            <aside class="panel-card attend-today">
-                <h3>Today</h3>
-                <p>${prettyDate(today)}</p>
-                ${staff.map((person) => {
-                    const mark = todayMap[String(person.user_id)];
-                    return html`<article key=${person.user_id} class="attend-person">
-                        <span class="avatar sm">${String(person.name || 'A').slice(0, 1)}</span>
-                        <div>
-                            <strong>${person.name}</strong>
-                            <em>${person.role_name || ''}</em>
-                            ${mark ? html`<span class=${'tag ' + (ATTEND_TONE[mark.status] || 'muted')}>${ATTEND_LABEL[mark.status] || mark.status}</span><small>${mark.check_in ? clock(mark.check_in) : '—'}${mark.check_out ? ' – ' + clock(mark.check_out) : ''}</small>` : html`<span class="tag muted">Not marked</span>`}
-                            ${sessions.filter((row) => String(row.user_id) === String(person.user_id)).map((row) => html`<small key=${row.id}>${row.location_name || 'Location'}${row.category_name ? ' · ' + row.category_name : ''}${row.entity_name ? ' · ' + row.entity_name : ''} · ${CHECK_WORD[row.check_status] || row.check_status}</small>`)}
-                        </div>
-                        ${canMark && (canCorrect || String(person.user_id) === String(user.id)) ? html`<button class="ghost" type="button" onClick=${() => openMark(person, today)}>${mark?.check_in && !mark?.check_out ? 'Out' : 'Mark'}</button>` : null}
-                    </article>`;
+        <section class="panel-card">
+            <div class="card-head"><div><h3>${prettyDate(date)}</h3><p>One list for the day. Location comes first, then the person, check-in, and check-out.</p></div></div>
+            <div class="table-card attend-sheet"><table class="board-table"><thead><tr>
+                <th>Location</th><th>Category</th><th>User</th><th>Check in</th><th>Check out</th><th>Status</th><th></th>
+            </tr></thead><tbody>
+                ${lines.length === 0 ? html`<tr><td colSpan="7">No one to show for this day.</td></tr>` : lines.map((line) => {
+                    const status = line.session?.status || line.mark?.status || '';
+                    const open = line.session ? line.session.check_status === 'open' : !!(line.mark?.check_in && !line.mark?.check_out);
+                    const checkIn = line.session?.check_in || line.mark?.check_in;
+                    const checkOut = line.session?.check_out || line.mark?.check_out;
+                    return html`<tr key=${line.key}>
+                        <td><strong>${line.session?.location_name || line.session?.check_in_place || '—'}</strong></td>
+                        <td>${line.session?.category_name || '—'}</td>
+                        <td class="attend-name"><strong>${line.person.name}</strong><em>${line.person.role_name || line.person.profile || ''}</em></td>
+                        <td class="time-cell in">${timeText(checkIn)}</td>
+                        <td class="time-cell out">${timeText(checkOut)}</td>
+                        <td>${status ? html`<span class=${'tag ' + (ATTEND_TONE[status] || 'muted')}>${ATTEND_LABEL[status] || status}</span>` : html`<span class="tag muted">Not marked</span>`}</td>
+                        <td class="row-actions">${canTouch(line.person) ? (open ? actIcon('update', 'Check out', () => openMark(line.person, line.session), true) : html`<button class="primary" type="button" onClick=${() => openMark(line.person, line.session)}>Mark</button>`) : null}</td>
+                    </tr>`;
                 })}
-            </aside>
-        </div>
-        ${marking ? html`<${AttendForm} key=${marking.person.user_id + marking.date} marking=${marking} area=${area} onDone=${() => { setMarking(null); load(); }} onClose=${() => setMarking(null)} />` : null}
+            </tbody></table></div>
+        </section>
+        ${marking ? html`<${AttendForm} key=${marking.person.user_id + marking.date + (marking.locationId || '')} marking=${marking} area=${area} onDone=${() => { setMarking(null); load(); }} onClose=${() => setMarking(null)} />` : null}
     </div>`;
 }
+function placeOption(row) {
+    const name = [row.name || 'Location', row.category_name].filter(Boolean).join(' · ');
+    const extra = [];
+    if (row.entity_name) extra.push(row.entity_name);
+    if (row.distance_metres != null) extra.push(row.distance_metres + ' m away');
+    if (row.check_status && row.check_status !== 'none') extra.push(CHECK_WORD[row.check_status] || '');
+    return name + (extra.length ? ' — ' + extra.join(' · ') : '');
+}
 function AttendForm({ marking, area, onDone, onClose }) {
-    const [form, setForm] = useState({ status: marking.status, action: marking.action, note: marking.note, location_id: '' });
+    const [form, setForm] = useState({ status: marking.status, action: marking.action, note: marking.note, location_id: marking.locationId || '' });
     const [places, setPlaces] = useState([]);
     const [error, setError] = useState('');
     const set = (key) => (event) => setForm({ ...form, [key]: event.target.value });
@@ -2984,15 +3011,24 @@ function AttendForm({ marking, area, onDone, onClose }) {
         call(path).then((rows) => {
             const list = (Array.isArray(rows) ? rows : []).filter((row) => marking.self || row.status === 'active');
             setPlaces(list);
-            const open = list.find((row) => row.check_status === 'open');
-            if (open) setForm((current) => ({ ...current, location_id: String(open.id), action: 'out' }));
+            setForm((current) => {
+                if (current.location_id) return current;
+                const open = list.find((row) => row.check_status === 'open');
+                return open ? { ...current, location_id: String(open.id), action: 'out' } : current;
+            });
             if (!marking.self || list.length === 0) return;
             readPlace().then((here) => call('/api/v1/attendance/places?lat=' + here.lat + '&lng=' + here.lng)).then((near) => {
                 if (Array.isArray(near)) setPlaces(near);
             }).catch(() => {});
         }).catch((e) => setError(e.message));
     }, []);
+    const showPlace = places.length > 0 && (form.status === 'present' || form.status === 'late');
     const needsGps = marking.self && (form.status === 'present' || form.status === 'late') && (places.length > 0 || Number(area?.attendanceKm) > 0);
+    function pickPlace(event) {
+        const locationId = event.target.value;
+        const row = places.find((item) => String(item.id) === locationId);
+        setForm({ ...form, location_id: locationId, action: row && row.check_status === 'open' ? 'out' : (locationId ? 'in' : form.action) });
+    }
     async function submit(event) {
         event.preventDefault();
         setError('');
@@ -3010,14 +3046,10 @@ function AttendForm({ marking, area, onDone, onClose }) {
         ${xrow('User', html`<input value=${marking.person.name} readOnly />`)}
         ${xrow('Date', html`<input type="date" value=${marking.date} readOnly />`)}
         ${xrow('Status', html`<select value=${form.status} onChange=${set('status')}>${Object.entries(ATTEND_LABEL).map(([value, label]) => html`<option key=${value} value=${value}>${label}</option>`)}</select>`, true)}
-        ${places.length > 0 && (form.status === 'present' || form.status === 'late') ? html`<div class="place-list">${places.map((row) => html`<button key=${row.id} type="button" class=${'place-card' + (String(form.location_id) === String(row.id) ? ' on' : '')} onClick=${() => setForm({ ...form, location_id: String(row.id), action: row.check_status === 'open' ? 'out' : form.action })}>
-            <strong>${row.name}</strong>
-            <span>${row.category_name || 'Location'}${row.entity_name ? ' · ' + row.entity_name : ''}</span>
-            <em>${row.distance_metres == null ? '' : row.distance_metres + ' m away'}${row.check_status ? (row.distance_metres == null ? '' : ' · ') + (CHECK_WORD[row.check_status] || '') : ''}</em>
-        </button>`)}</div>` : null}
+        ${showPlace ? xrow('Location', html`<select value=${form.location_id} onChange=${pickPlace}><option value="">Choose a location</option>${places.map((row) => html`<option key=${row.id} value=${String(row.id)}>${placeOption(row)}</option>`)}</select>`, true) : null}
         ${xrow('Action', html`<select value=${form.action} onChange=${set('action')}><option value="in">Check in</option><option value="out">Check out</option></select>`)}
         ${xrow('Note', html`<input value=${form.note} onInput=${set('note')} />`)}
-        ${needsGps && places.length > 0 ? html`<p class="muted">Check-in and check-out use this device’s location and must be inside the selected place.</p>` : null}
+        ${showPlace ? html`<p class="muted">Any active location can be selected. Check-in and check-out still have to be inside that place.</p>` : null}
         ${needsGps && places.length === 0 ? html`<p class="muted">Check-in and check-out use this device’s location and must be inside ${area.attendanceKm} km of the company.</p>` : null}
     `, true, 'Save');
 }
@@ -3176,8 +3208,10 @@ function App() {
                 ${screen === 'whatsapp' ? html`<${WhatsAppBoard} />` : null}
                 ${spec && spec.kind === 'sites' ? html`<${SitesBoard} key=${screen} start=${spec.start} />` : null}
                 ${spec && spec.kind === 'attendance' ? html`<${AttendanceBoard} key="attendance" user=${user} />` : null}
+                ${spec && spec.kind === 'locations' ? html`<${LocationBoard} key="locations" />` : null}
+                ${spec && spec.kind === 'location-categories' ? html`<${CategoryBoard} key="location-categories" />` : null}
                 ${spec && spec.kind === 'company' ? html`<${CompanyBoard} onSaved=${async () => { setUser(await call('/api/v1/me')); setCompany(await call('/api/v1/company')); }} />` : null}
-                ${spec && screen !== 'notifications' && screen !== 'whatsapp' && spec.kind !== 'sites' && spec.kind !== 'attendance' && spec.kind !== 'company' ? html`<${Resource} key=${screen} title=${title} lede=${spec.lede} spec=${spec} />` : null}
+                ${spec && screen !== 'notifications' && screen !== 'whatsapp' && spec.kind !== 'sites' && spec.kind !== 'attendance' && spec.kind !== 'locations' && spec.kind !== 'location-categories' && spec.kind !== 'company' ? html`<${Resource} key=${screen} title=${title} lede=${spec.lede} spec=${spec} />` : null}
                 ${passwordOpen ? html`<${ChangePassword} onClose=${() => setPasswordOpen(false)} />` : null}
             </main>
         </div>

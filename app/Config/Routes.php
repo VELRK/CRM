@@ -51,7 +51,26 @@ $routes->group('api/v1', ['filter' => 'apiauth'], static function ($routes) {
     $routes->post('plots/(:num)/delete', 'Api\DeskApi::deletePlot/$1');
     $routes->post('plots/(:num)', 'Api\DeskApi::savePlot/$1');
 
+    $routes->get('mobile/dashboard', 'Api\DeskApi::mobileDashboard');
+
+    $routes->get('lead-stages', 'Api\DeskApi::catalogList/lead_stage');
+    $routes->post('lead-stages/(:num)/delete', 'Api\DeskApi::catalogDelete/lead_stage/$1');
+    $routes->post('lead-stages/(:num)', 'Api\DeskApi::catalogSave/lead_stage/$1');
+    $routes->post('lead-stages', 'Api\DeskApi::catalogSave/lead_stage');
+
+    $routes->get('lead-sources', 'Api\DeskApi::catalogList/lead_source');
+    $routes->post('lead-sources/(:num)/delete', 'Api\DeskApi::catalogDelete/lead_source/$1');
+    $routes->post('lead-sources/(:num)', 'Api\DeskApi::catalogSave/lead_source/$1');
+    $routes->post('lead-sources', 'Api\DeskApi::catalogSave/lead_source');
+
+    $routes->get('campaign-sources', 'Api\DeskApi::catalogList/campaign_source');
+    $routes->post('campaign-sources/(:num)/delete', 'Api\DeskApi::catalogDelete/campaign_source/$1');
+    $routes->post('campaign-sources/(:num)', 'Api\DeskApi::catalogSave/campaign_source/$1');
+    $routes->post('campaign-sources', 'Api\DeskApi::catalogSave/campaign_source');
+
     $routes->get('leads/export', 'Api\DeskApi::exportLeads');
+    $routes->get('leads/filter', 'Api\DeskApi::filterLeads');
+    $routes->post('leads/filter', 'Api\DeskApi::filterLeads');
     $routes->post('leads/check', 'Api\DeskApi::checkLead');
     $routes->post('leads/transfer', 'Api\DeskApi::bulkTransfer');
     $routes->get('leads', 'Api\DeskApi::leads');
@@ -70,17 +89,23 @@ $routes->group('api/v1', ['filter' => 'apiauth'], static function ($routes) {
     $routes->get('leads/(:num)', 'Api\DeskApi::lead/$1');
     $routes->post('leads/(:num)', 'Api\DeskApi::saveLead/$1');
 
+    $routes->get('followups/filter', 'Api\DeskApi::filterFollowups');
+    $routes->post('followups/filter', 'Api\DeskApi::filterFollowups');
     $routes->get('followups', 'Api\DeskApi::followups');
     $routes->post('followups', 'Api\DeskApi::saveFollowup');
     $routes->post('followups/(:num)/done', 'Api\DeskApi::doneFollowup/$1');
     $routes->post('followups/(:num)/reschedule', 'Api\DeskApi::rescheduleFollowup/$1');
 
+    $routes->get('visits/filter', 'Api\DeskApi::filterVisits');
+    $routes->post('visits/filter', 'Api\DeskApi::filterVisits');
     $routes->get('visits', 'Api\DeskApi::visits');
     $routes->post('visits', 'Api\DeskApi::saveVisit');
     $routes->post('visits/(:num)/done', 'Api\DeskApi::doneVisit/$1');
     $routes->post('visits/(:num)/reschedule', 'Api\DeskApi::rescheduleVisit/$1');
     $routes->post('visits/(:num)', 'Api\DeskApi::updateVisit/$1');
 
+    $routes->get('tasks/filter', 'Api\DeskApi::filterTasks');
+    $routes->post('tasks/filter', 'Api\DeskApi::filterTasks');
     $routes->get('tasks', 'Api\DeskApi::tasks');
     $routes->post('tasks', 'Api\DeskApi::saveTask');
     $routes->post('tasks/(:num)/done', 'Api\DeskApi::doneTask/$1');

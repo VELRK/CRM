@@ -712,6 +712,63 @@ class DeskApi extends BaseController
         ], $rows));
     }
 
+    public function mobileDashboard(): ResponseInterface
+    {
+        if ($denied = $this->guardAny(['leads.view', 'followups.view', 'reports.view'])) {
+            return $denied;
+        }
+
+        $actor = $this->actor();
+        $scope = $this->estate->reportScope($this->tenant(), $this->user(), (string) $actor['role_name'], (bool) $actor['is_owner']);
+
+        return $this->ok($this->estate->mobileCounts($this->tenant(), $scope));
+    }
+
+    public function catalogList(string $kind): ResponseInterface
+    {
+        if ($denied = $this->guard('leads.view')) {
+            return $denied;
+        }
+
+        $active = $this->request->getGet('active');
+        $only = $active === null || $active === '' ? null : in_array((string) $active, ['1', 'true', 'True'], true);
+
+        return $this->ok($this->estate->catalogItems($this->tenant(), $kind, $only));
+    }
+
+    public function catalogSave(string $kind, ?int $id = null): ResponseInterface
+    {
+        if ($denied = $this->guard('leads.update')) {
+            return $denied;
+        }
+
+        return $this->run(function () use ($kind, $id) {
+            return $this->ok($this->estate->saveCatalog($this->tenant(), $kind, $id, $this->input()));
+        });
+    }
+
+    public function catalogDelete(string $kind, int $id): ResponseInterface
+    {
+        if ($denied = $this->guard('leads.update')) {
+            return $denied;
+        }
+
+        return $this->run(function () use ($kind, $id) {
+            $this->estate->deleteCatalog($this->tenant(), $kind, $id);
+
+            return $this->ok(['id' => $id, 'deleted' => true]);
+        });
+    }
+
+    public function filterLeads(): ResponseInterface
+    {
+        if ($denied = $this->guard('leads.view')) {
+            return $denied;
+        }
+
+        return $this->filterRows($this->teamRows($this->sites->leads($this->tenant(), ''), ['owner_id']), 'lead');
+    }
+
     public function leads(): ResponseInterface
     {
         if ($denied = $this->guard('leads.view')) {
@@ -964,6 +1021,15 @@ class DeskApi extends BaseController
         return $this->pageList($this->teamRows($rows, ['assigned_to', 'user_id']));
     }
 
+    public function filterFollowups(): ResponseInterface
+    {
+        if ($denied = $this->guard('followups.view')) {
+            return $denied;
+        }
+
+        return $this->filterRows($this->teamRows($this->sites->followups($this->tenant()), ['assigned_to', 'user_id']), 'followup');
+    }
+
     public function saveFollowup(): ResponseInterface
     {
         if ($denied = $this->guard('followups.create')) {
@@ -1013,6 +1079,15 @@ class DeskApi extends BaseController
         }
 
         return $this->pageList($this->teamRows($this->sites->visits($this->tenant()), ['staff_id']));
+    }
+
+    public function filterVisits(): ResponseInterface
+    {
+        if ($denied = $this->guard('visits.view')) {
+            return $denied;
+        }
+
+        return $this->filterRows($this->teamRows($this->sites->visits($this->tenant()), ['staff_id']), 'visit');
     }
 
     public function saveVisit(): ResponseInterface
@@ -1077,6 +1152,15 @@ class DeskApi extends BaseController
         }
 
         return $this->pageList($this->teamRows($this->sites->tasks($this->tenant()), ['assigned_to']));
+    }
+
+    public function filterTasks(): ResponseInterface
+    {
+        if ($denied = $this->guard('followups.view')) {
+            return $denied;
+        }
+
+        return $this->filterRows($this->teamRows($this->sites->tasks($this->tenant()), ['assigned_to']), 'task');
     }
 
     public function saveTask(): ResponseInterface
@@ -1744,6 +1828,205 @@ class DeskApi extends BaseController
         $actor = $this->actor();
 
         return $this->estate->reportScope($this->tenant(), $this->user(), (string) $actor['role_name'], (bool) $actor['is_owner']);
+    }
+
+    /**
+     * @param list<array<string, mixed>> $rows
+     */
+    private function filterRows(array $rows, string $kind): ResponseInterface
+    {
+        $bag = $this->filterInput();
+        $bounds = $this->filterBounds($bag);
+
+        if ($bounds instanceof ResponseInterface) {
+            return $bounds;
+        }
+
+        $needle = strtolower(trim((string) ($bag['q'] ?? '')));
+        $stage = strtolower(trim((string) ($bag['stage'] ?? $bag['leadStage'] ?? $bag['lead_stage'] ?? '')));
+        $source = strtolower(trim((string) ($bag['source'] ?? $bag['leadSource'] ?? $bag['lead_source'] ?? '')));
+        $campaign = strtolower(trim((string) ($bag['campaign'] ?? $bag['campaignSource'] ?? $bag['campaign_source'] ?? '')));
+        $project = strtolower(trim((string) ($bag['project'] ?? $bag['project_name'] ?? '')));
+        $projectId = (int) ($bag['projectId'] ?? $bag['project_id'] ?? 0);
+        $assignee = strtolower(trim((string) ($bag['assignee'] ?? '')));
+        $assignedTo = (int) ($bag['assignedTo'] ?? $bag['assigned_to'] ?? 0);
+        $status = strtoupper(trim((string) ($bag['status'] ?? '')));
+        $matched = [];
+
+        foreach ($rows as $row) {
+            if ($stage !== '' && strtolower((string) ($row['lead_stage'] ?? '')) !== $stage) {
+                continue;
+            }
+
+            if ($source !== '' && strtolower((string) ($row['lead_source'] ?? $row['source'] ?? '')) !== $source) {
+                continue;
+            }
+
+            if ($campaign !== '' && strtolower((string) ($row['campaign_source'] ?? '')) !== $campaign) {
+                continue;
+            }
+
+            if ($project !== '' && strtolower((string) ($row['project_name'] ?? '')) !== $project) {
+                continue;
+            }
+
+            if ($projectId > 0 && (int) ($row['project_id'] ?? 0) !== $projectId) {
+                continue;
+            }
+
+            if ($assignee !== '') {
+                $names = [
+                    strtolower(trim((string) ($row['assigned_name'] ?? ''))),
+                    strtolower(trim((string) ($row['owner_name'] ?? ''))),
+                    strtolower(trim((string) ($row['staff_name'] ?? ''))),
+                ];
+
+                if (! in_array($assignee, $names, true)) {
+                    continue;
+                }
+            }
+
+            if ($assignedTo > 0) {
+                $ids = [(int) ($row['owner_id'] ?? 0), (int) ($row['assigned_to'] ?? 0), (int) ($row['staff_id'] ?? 0), (int) ($row['user_id'] ?? 0)];
+
+                if (! in_array($assignedTo, $ids, true)) {
+                    continue;
+                }
+            }
+
+            if ($status !== '' && strtoupper((string) ($row['display_status'] ?? $row['status'] ?? '')) !== $status) {
+                continue;
+            }
+
+            if ($bounds !== null) {
+                $when = match ($kind) {
+                    'followup' => (string) ($row['call_scheduled_at'] ?? $row['next_at'] ?? ''),
+                    'visit'    => (string) ($row['scheduled_date_time'] ?? $row['scheduled_at'] ?? ''),
+                    'task'     => (string) ($row['scheduled_at'] ?? ''),
+                    default    => (string) ($row['created_at'] ?? ''),
+                };
+                $day = substr($when, 0, 10);
+
+                if (! preg_match('/^\d{4}-\d{2}-\d{2}$/', $day) || $day < $bounds[0] || $day > $bounds[1]) {
+                    continue;
+                }
+            }
+
+            if ($needle !== '') {
+                $blob = strtolower(implode(' ', array_filter($row, static fn ($value): bool => is_scalar($value))));
+
+                if (! str_contains($blob, $needle)) {
+                    continue;
+                }
+            }
+
+            $matched[] = $row;
+        }
+
+        $total = count($matched);
+        $per = (int) ($bag['per_page'] ?? 0);
+
+        if ($per < 1) {
+            return $this->response->setJSON(['ok' => true, 'data' => $matched, 'meta' => ['total' => $total]]);
+        }
+
+        $per = min(100, $per);
+        $page = max(1, (int) ($bag['page'] ?? 1));
+
+        return $this->response->setJSON([
+            'ok'   => true,
+            'data' => array_slice($matched, ($page - 1) * $per, $per),
+            'meta' => ['page' => $page, 'per_page' => $per, 'total' => $total],
+        ]);
+    }
+
+    /**
+     * @param array<string, mixed> $bag
+     * @return array{0: string, 1: string}|null|ResponseInterface
+     */
+    private function filterBounds(array $bag): array|ResponseInterface|null
+    {
+        $range = strtolower(trim((string) ($bag['range'] ?? 'all')));
+
+        if ($range === '' || $range === 'all') {
+            return null;
+        }
+
+        $today = date('Y-m-d');
+        $stamp = static fn (string $day, int $shift): string => date('Y-m-d', strtotime($day . ' ' . $shift . ' days'));
+
+        if ($range === 'today') {
+            return [$today, $today];
+        }
+
+        if ($range === 'yesterday') {
+            $day = $stamp($today, -1);
+
+            return [$day, $day];
+        }
+
+        if ($range === 'this_week' || $range === 'last_week') {
+            $mondayShift = -((int) date('N') - 1);
+
+            if ($range === 'last_week') {
+                $mondayShift -= 7;
+            }
+
+            return [$stamp($today, $mondayShift), $stamp($today, $mondayShift + 6)];
+        }
+
+        if ($range === 'this_month') {
+            return [date('Y-m-01'), date('Y-m-t')];
+        }
+
+        if ($range === 'last_month') {
+            return [date('Y-m-01', strtotime('first day of last month')), date('Y-m-t', strtotime('last day of last month'))];
+        }
+
+        if ($range === 'last_6_months') {
+            return [date('Y-m-d', strtotime($today . ' -6 months')), $today];
+        }
+
+        if ($range === 'this_year') {
+            return [date('Y-01-01'), date('Y-12-31')];
+        }
+
+        if ($range === 'custom') {
+            $from = substr((string) ($bag['from'] ?? ''), 0, 10);
+            $to = substr((string) ($bag['to'] ?? ''), 0, 10);
+
+            if (! preg_match('/^\d{4}-\d{2}-\d{2}$/', $from) || ! preg_match('/^\d{4}-\d{2}-\d{2}$/', $to)) {
+                return $this->fail('Use a start date and an end date like 2026-10-01.', 422);
+            }
+
+            if ($to < $from) {
+                return $this->fail('End date must be after the start date.', 422);
+            }
+
+            return [$from, $to];
+        }
+
+        return $this->fail('Use a range like today, this_month, or custom.', 422);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function filterInput(): array
+    {
+        $bag = [];
+
+        foreach ((array) $this->request->getGet() as $key => $value) {
+            if (is_string($key) && ! in_array($key, ['companyId', 'company_id'], true)) {
+                $bag[$key] = $value;
+            }
+        }
+
+        foreach ($this->input() as $key => $value) {
+            $bag[$key] = $value;
+        }
+
+        return $bag;
     }
 
     /**

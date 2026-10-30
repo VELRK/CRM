@@ -177,6 +177,286 @@ class EstateService
     /**
      * @return list<array<string, mixed>>
      */
+    public function catalogItems(int $tenantId, string $kind, ?bool $activeOnly = null): array
+    {
+        $this->assertCatalogKind($kind);
+
+        if (! $this->db->tableExists('lookup_items')) {
+            return [];
+        }
+
+        $builder = $this->db->table('lookup_items')
+            ->where('tenant_id', $tenantId)
+            ->where('kind', $kind)
+            ->where('deleted_at', null)
+            ->orderBy('sort_order', 'ASC')
+            ->orderBy('label', 'ASC');
+
+        if ($activeOnly === true) {
+            $builder->where('active', 1);
+        }
+
+        return array_map(fn (array $row): array => $this->presentCatalog($row), $builder->get()->getResultArray());
+    }
+
+    /**
+     * @param array<string, mixed> $input
+     * @return array<string, mixed>
+     */
+    public function saveCatalog(int $tenantId, string $kind, ?int $id, array $input): array
+    {
+        $this->assertCatalogKind($kind);
+
+        if (! $this->db->tableExists('lookup_items')) {
+            throw new RuntimeException('The list is not ready yet.');
+        }
+
+        $name = trim((string) ($input['name'] ?? $input['label'] ?? ''));
+
+        if ($name === '' || strlen($name) > 80) {
+            throw new RuntimeException('Enter a name of 80 characters or less.');
+        }
+
+        $code = $this->catalogCode($name);
+        $taken = $this->db->table('lookup_items')
+            ->where('tenant_id', $tenantId)
+            ->where('kind', $kind)
+            ->groupStart()
+                ->where('code', $code)
+                ->orWhere('label', $name)
+            ->groupEnd()
+            ->get()
+            ->getResultArray();
+
+        foreach ($taken as $row) {
+            if ($id !== null && (int) $row['id'] === $id) {
+                continue;
+            }
+
+            if ($row['deleted_at'] === null) {
+                throw new RuntimeException('That name is already in the list.');
+            }
+        }
+
+        $active = array_key_exists('active', $input) ? (empty($input['active']) ? 0 : 1) : null;
+        $sort = array_key_exists('sort_order', $input) ? max(0, (int) $input['sort_order']) : null;
+
+        if ($id === null) {
+            $trashed = null;
+
+            foreach ($taken as $row) {
+                if ($row['deleted_at'] !== null && (string) $row['code'] === $code) {
+                    $trashed = $row;
+                    break;
+                }
+            }
+
+            if ($trashed !== null) {
+                $id = (int) $trashed['id'];
+            }
+        }
+
+        if ($id === null) {
+            $max = $this->db->table('lookup_items')
+                ->selectMax('sort_order', 'top')
+                ->where('tenant_id', $tenantId)
+                ->where('kind', $kind)
+                ->get()
+                ->getRowArray();
+            $this->db->table('lookup_items')->insert([
+                'tenant_id'  => $tenantId,
+                'kind'       => $kind,
+                'code'       => $code,
+                'label'      => $name,
+                'sort_order' => $sort ?? ((int) ($max['top'] ?? 0) + 1),
+                'active'     => $active ?? 1,
+                'deleted_at' => null,
+            ]);
+
+            return $this->presentCatalog($this->catalogRow($tenantId, $kind, (int) $this->db->insertID()));
+        }
+
+        $current = $this->db->table('lookup_items')
+            ->where('tenant_id', $tenantId)
+            ->where('kind', $kind)
+            ->where('id', $id)
+            ->get()
+            ->getRowArray();
+
+        if ($current === null) {
+            throw new RuntimeException('That item is not in this workspace.');
+        }
+
+        $this->db->table('lookup_items')->where('id', $id)->update([
+            'code'       => $code,
+            'label'      => $name,
+            'sort_order' => $sort ?? (int) $current['sort_order'],
+            'active'     => $active ?? (int) $current['active'],
+            'deleted_at' => null,
+        ]);
+
+        return $this->presentCatalog($this->catalogRow($tenantId, $kind, $id));
+    }
+
+    public function deleteCatalog(int $tenantId, string $kind, int $id): void
+    {
+        $this->assertCatalogKind($kind);
+        $row = $this->db->table('lookup_items')
+            ->where('tenant_id', $tenantId)
+            ->where('kind', $kind)
+            ->where('id', $id)
+            ->where('deleted_at', null)
+            ->get()
+            ->getRowArray();
+
+        if ($row === null) {
+            throw new RuntimeException('That item is not in this workspace.');
+        }
+
+        $this->db->table('lookup_items')->where('id', $id)->update(['deleted_at' => date('Y-m-d H:i:s')]);
+    }
+
+    /**
+     * Counts for the mobile home. Scoped the same way as the desk dashboard.
+     *
+     * @param array{level?: string, user_ids?: ?list<int>, team_ids?: ?list<int>}|null $scope
+     * @return array<string, mixed>
+     */
+    public function mobileCounts(int $tenantId, ?array $scope = null): array
+    {
+        $userIds = $scope['user_ids'] ?? null;
+        $board = $this->dashboard($tenantId, $scope);
+        $newLeads = 0;
+
+        foreach ($board['funnel'] ?? [] as $row) {
+            if ((string) ($row['label'] ?? '') === 'New') {
+                $newLeads = (int) ($row['total'] ?? 0);
+            }
+        }
+
+        $tasks = 0;
+
+        if ($this->db->tableExists('lead_tasks')) {
+            $tasks = $this->applyUsers(
+                $this->db->table('lead_tasks')
+                    ->where('tenant_id', $tenantId)
+                    ->where('deleted_at', null)
+                    ->where('completed_date', null)
+                    ->whereNotIn('current_state', ['COMPLETED', 'CANCELLED', 'CANCELED']),
+                'assigned_to',
+                $userIds,
+            )->countAllResults();
+        }
+
+        $campaigns = [];
+
+        if ($this->db->fieldExists('campaign_source', 'leads')) {
+            $campaigns = $this->namedCounts($this->grouped($tenantId, 'leads', 'campaign_source', 'owner_id', $userIds), 'campaign_source');
+        }
+
+        $stages = [];
+
+        foreach ($board['funnel'] ?? [] as $row) {
+            $stages[] = ['name' => (string) ($row['label'] ?? ''), 'total' => (int) ($row['total'] ?? 0)];
+        }
+
+        $sources = [];
+
+        foreach ($board['sources'] ?? [] as $row) {
+            $sources[] = ['name' => (string) ($row['label'] ?? $row['source'] ?? ''), 'total' => (int) ($row['total'] ?? 0)];
+        }
+
+        return [
+            'leads'               => (int) ($board['leads'] ?? 0),
+            'new_leads'           => $newLeads,
+            'followups'           => (int) ($board['followups'] ?? 0),
+            'followups_overdue'   => (int) ($board['follow_split']['overdue'] ?? 0),
+            'followups_upcoming'  => (int) ($board['follow_split']['upcoming'] ?? 0),
+            'followups_done'      => (int) ($board['follow_split']['done'] ?? 0),
+            'visits'              => (int) ($board['visits'] ?? 0),
+            'tasks'               => $tasks,
+            'plots_available'     => (int) ($board['available'] ?? 0),
+            'stages'              => $stages,
+            'sources'             => $sources,
+            'campaigns'           => $campaigns,
+        ];
+    }
+
+    private function assertCatalogKind(string $kind): void
+    {
+        if (! in_array($kind, ['lead_stage', 'lead_source', 'campaign_source'], true)) {
+            throw new RuntimeException('That list is not available.');
+        }
+    }
+
+    private function catalogCode(string $name): string
+    {
+        $code = strtolower(trim((string) preg_replace('/[^a-z0-9]+/i', '-', $name), '-'));
+
+        if (strlen($code) < 2) {
+            $code = 'item';
+        }
+
+        return substr($code, 0, 40);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function catalogRow(int $tenantId, string $kind, int $id): array
+    {
+        $row = $this->db->table('lookup_items')
+            ->where('tenant_id', $tenantId)
+            ->where('kind', $kind)
+            ->where('id', $id)
+            ->get()
+            ->getRowArray();
+
+        if ($row === null) {
+            throw new RuntimeException('That item is not in this workspace.');
+        }
+
+        return $row;
+    }
+
+    /**
+     * @param array<string, mixed> $row
+     * @return array<string, mixed>
+     */
+    private function presentCatalog(array $row): array
+    {
+        return [
+            'id'         => (int) $row['id'],
+            'name'       => (string) $row['label'],
+            'active'     => (int) $row['active'] === 1,
+            'sort_order' => (int) $row['sort_order'],
+        ];
+    }
+
+    /**
+     * @param list<array<string, mixed>> $rows
+     * @return list<array<string, mixed>>
+     */
+    private function namedCounts(array $rows, string $column): array
+    {
+        $out = [];
+
+        foreach ($rows as $row) {
+            $name = trim((string) ($row[$column] ?? ''));
+
+            if ($name === '') {
+                continue;
+            }
+
+            $out[] = ['name' => $name, 'total' => (int) ($row['total'] ?? 0)];
+        }
+
+        return $out;
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
     public function teams(int $tenantId): array
     {
         if (! $this->db->tableExists('teams')) {

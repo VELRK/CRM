@@ -73,7 +73,29 @@ class ApiCatalog
             self::entry('Plots', 'FR-3.4', 'Plot status history', 'GET', '/api/v1/plots/1/history', true, 'plots.view', null, ['ok' => true, 'data' => [['old_status' => 'available', 'new_status' => 'booked', 'remark' => 'Token received', 'created_at' => '2026-10-24 15:00:00']]]),
             self::entry('Plots', 'FR-3.5', 'Export plots', 'GET', '/api/v1/plots/export', true, 'exports.download', null, 'CSV file'),
 
+            self::entry('Mobile', 'FR-4', 'Dashboard counts', 'GET', '/api/v1/mobile/dashboard', true, 'leads.view', null, ['ok' => true, 'data' => [
+                'leads' => 30, 'new_leads' => 8, 'followups' => 12, 'followups_overdue' => 3, 'followups_upcoming' => 9, 'followups_done' => 20,
+                'visits' => 6, 'tasks' => 4, 'plots_available' => 40,
+                'stages' => [['name' => 'New', 'total' => 8]],
+                'sources' => [['name' => 'Walk-in', 'total' => 5]],
+                'campaigns' => [['name' => 'Facebook', 'total' => 2]],
+            ]]),
+            self::entry('Mobile', 'FR-4.2', 'List lead stages', 'GET', '/api/v1/lead-stages?active=1', true, 'leads.view', null, ['ok' => true, 'data' => [['id' => 1, 'name' => 'New', 'active' => true, 'sort_order' => 1]]]),
+            self::entry('Mobile', 'FR-4.2', 'Add lead stage', 'POST', '/api/v1/lead-stages', true, 'leads.update', ['name' => 'Negotiation', 'active' => true], ['ok' => true, 'data' => ['id' => 2, 'name' => 'Negotiation', 'active' => true, 'sort_order' => 2]]),
+            self::entry('Mobile', 'FR-4.2', 'Update lead stage', 'POST', '/api/v1/lead-stages/2', true, 'leads.update', ['name' => 'Negotiation', 'active' => false], ['ok' => true, 'data' => ['id' => 2, 'name' => 'Negotiation', 'active' => false, 'sort_order' => 2]]),
+            self::entry('Mobile', 'FR-4.2', 'Delete lead stage', 'POST', '/api/v1/lead-stages/2/delete', true, 'leads.update', new \stdClass(), ['ok' => true, 'data' => ['id' => 2, 'deleted' => true]]),
+            self::entry('Mobile', 'FR-4.2', 'List lead sources', 'GET', '/api/v1/lead-sources', true, 'leads.view', null, ['ok' => true, 'data' => [['id' => 1, 'name' => 'Walk-in', 'active' => true, 'sort_order' => 1]]]),
+            self::entry('Mobile', 'FR-4.2', 'Add lead source', 'POST', '/api/v1/lead-sources', true, 'leads.update', ['name' => 'Walk-in'], ['ok' => true, 'data' => ['id' => 1, 'name' => 'Walk-in', 'active' => true, 'sort_order' => 1]]),
+            self::entry('Mobile', 'FR-4.2', 'Update lead source', 'POST', '/api/v1/lead-sources/1', true, 'leads.update', ['name' => 'Walk in', 'active' => true], ['ok' => true, 'data' => ['id' => 1, 'name' => 'Walk in', 'active' => true, 'sort_order' => 1]]),
+            self::entry('Mobile', 'FR-4.2', 'Delete lead source', 'POST', '/api/v1/lead-sources/1/delete', true, 'leads.update', new \stdClass(), ['ok' => true, 'data' => ['id' => 1, 'deleted' => true]]),
+            self::entry('Mobile', 'FR-4.2', 'List campaign sources', 'GET', '/api/v1/campaign-sources', true, 'leads.view', null, ['ok' => true, 'data' => [['id' => 1, 'name' => 'Facebook', 'active' => true, 'sort_order' => 1]]]),
+            self::entry('Mobile', 'FR-4.2', 'Add campaign source', 'POST', '/api/v1/campaign-sources', true, 'leads.update', ['name' => 'Facebook'], ['ok' => true, 'data' => ['id' => 1, 'name' => 'Facebook', 'active' => true, 'sort_order' => 1]]),
+            self::entry('Mobile', 'FR-4.2', 'Update campaign source', 'POST', '/api/v1/campaign-sources/1', true, 'leads.update', ['name' => 'Facebook Ads'], ['ok' => true, 'data' => ['id' => 1, 'name' => 'Facebook Ads', 'active' => true, 'sort_order' => 1]]),
+            self::entry('Mobile', 'FR-4.2', 'Delete campaign source', 'POST', '/api/v1/campaign-sources/1/delete', true, 'leads.update', new \stdClass(), ['ok' => true, 'data' => ['id' => 1, 'deleted' => true]]),
             self::entry('Leads', 'FR-4.2', 'List leads', 'GET', '/api/v1/leads?q=Ravi', true, 'leads.view', null, ['ok' => true, 'data' => [$lead]]),
+            self::entry('Mobile', 'FR-4.2', 'Filter leads', 'POST', '/api/v1/leads/filter', true, 'leads.view', [
+                'q' => 'Ravi', 'stage' => 'New', 'source' => 'Walk-in', 'campaign' => 'Facebook', 'project' => 'Green Meadows', 'assignee' => 'Priya', 'range' => 'this_month',
+            ], ['ok' => true, 'data' => [$lead], 'meta' => ['total' => 1]]),
             self::entry('Leads', 'FR-4.4', 'Duplicate phone check', 'POST', '/api/v1/leads/check', true, 'leads.view', ['phoneNumber' => '9840012345'], ['ok' => true, 'data' => ['duplicate' => true, 'lead' => $lead, 'timeline' => []]]),
             self::entry('Leads', 'FR-4.2', 'Create lead', 'POST', '/api/v1/leads', true, 'leads.create', $leadInput, ['ok' => true, 'data' => ['id' => 1]]),
             self::entry('Leads', 'FR-4.6', 'Lead timeline', 'GET', '/api/v1/leads/1/timeline', true, 'leads.view', null, ['ok' => true, 'data' => [['title' => 'Follow-up', 'meta' => '24 Oct', 'body' => 'Asked about the east plot']]]),
@@ -82,12 +104,18 @@ class ApiCatalog
             self::entry('Leads', 'FR-4.2', 'Export leads', 'GET', '/api/v1/leads/export', true, 'exports.download', null, 'CSV file'),
 
             self::entry('Follow-ups', 'FR-6.3', 'List follow-ups', 'GET', '/api/v1/followups?view=today', true, 'followups.view', null, ['ok' => true, 'data' => [['id' => 4, 'lead_id' => 1, 'lead_name' => 'Mr. Ravi Kumar', 'lead_phone' => '9840012345', 'call_subject' => 'Site visit', 'call_purpose' => 'Follow up', 'call_scheduled_at' => '2026-10-30 11:00:00', 'display_status' => 'SCHEDULED', 'assigned_name' => 'Priya', 'assigned_by_name' => 'Priya']]]),
+            self::entry('Mobile', 'FR-6.3', 'Filter follow-ups', 'POST', '/api/v1/followups/filter', true, 'followups.view', [
+                'status' => 'OVERDUE', 'assignee' => 'Priya', 'project' => 'Green Meadows', 'range' => 'this_month', 'q' => 'Ravi',
+            ], ['ok' => true, 'data' => [['id' => 4, 'lead_name' => 'Mr. Ravi Kumar', 'display_status' => 'OVERDUE']], 'meta' => ['total' => 1]]),
             self::entry('Follow-ups', 'FR-6.1', 'Log a follow-up', 'POST', '/api/v1/followups', true, 'followups.create', [
                 'leadId' => 1, 'callSubject' => 'Site visit', 'callPurpose' => 'Follow up', 'callDescription' => 'Call back about the east plot', 'callScheduledDateTime' => '2026-10-30T11:00', 'assignedTo' => 2,
             ], ['ok' => true, 'data' => ['id' => 5]]),
             self::entry('Follow-ups', 'FR-6.1', 'Mark follow-up done', 'POST', '/api/v1/followups/5/done', true, 'followups.create', new \stdClass(), ['ok' => true, 'data' => ['id' => 5, 'status' => 'COMPLETED']]),
 
             self::entry('Visits', 'FR-8.1', 'List visits', 'GET', '/api/v1/visits', true, 'visits.view', null, ['ok' => true, 'data' => [['id' => 1, 'lead_id' => 1, 'lead_name' => 'Mr. Ravi Kumar', 'project_name' => 'Green Meadows', 'visit_type' => 'New Visit', 'scheduled_date_time' => '2026-10-30 10:00:00', 'display_status' => 'SCHEDULED', 'assigned_name' => 'Priya']]]),
+            self::entry('Mobile', 'FR-8.1', 'Filter visits', 'POST', '/api/v1/visits/filter', true, 'visits.view', [
+                'status' => 'SCHEDULED', 'assignee' => 'Priya', 'project' => 'Green Meadows', 'range' => 'today',
+            ], ['ok' => true, 'data' => [['id' => 1, 'lead_name' => 'Mr. Ravi Kumar', 'display_status' => 'SCHEDULED']], 'meta' => ['total' => 1]]),
             self::entry('Visits', 'FR-8.1', 'Schedule a visit', 'POST', '/api/v1/visits', true, 'visits.create', [
                 'leadId' => 1, 'projectId' => 1, 'scheduledDateTime' => '2026-10-30T10:00', 'assignedTo' => 2, 'visitType' => 'New Visit', 'description' => 'Walk the east row', 'currentState' => 'SCHEDULED',
             ], ['ok' => true, 'data' => ['id' => 2]]),
@@ -159,6 +187,9 @@ class ApiCatalog
             self::entry('Visits', 'FR-8.2', 'Mark visit done', 'POST', '/api/v1/visits/1/done', true, 'visits.attend', new \stdClass(), ['ok' => true, 'data' => ['id' => 1, 'status' => 'COMPLETED']]),
             self::entry('Visits', 'FR-8.1', 'Reschedule visit', 'POST', '/api/v1/visits/1/reschedule', true, 'visits.create', ['scheduledDateTime' => '2026-10-31T10:00'], ['ok' => true, 'data' => ['id' => 1, 'status' => 'SCHEDULED']]),
             self::entry('Tasks', 'FR-6.4', 'List tasks', 'GET', '/api/v1/tasks', true, 'followups.view', null, ['ok' => true, 'data' => [['id' => 1, 'lead_id' => 1, 'lead_name' => 'Mr. Ravi Kumar', 'subject' => 'Send brochure', 'priority' => 'MEDIUM', 'scheduled_at' => '2026-10-30 15:00:00', 'display_status' => 'SCHEDULED', 'assigned_name' => 'Priya']]]),
+            self::entry('Mobile', 'FR-6.4', 'Filter tasks', 'POST', '/api/v1/tasks/filter', true, 'followups.view', [
+                'status' => 'SCHEDULED', 'assignee' => 'Priya', 'range' => 'this_week', 'q' => 'brochure',
+            ], ['ok' => true, 'data' => [['id' => 1, 'subject' => 'Send brochure', 'display_status' => 'SCHEDULED']], 'meta' => ['total' => 1]]),
             self::entry('Tasks', 'FR-6.4', 'Create task', 'POST', '/api/v1/tasks', true, 'followups.create', ['leadId' => 1, 'subject' => 'Send brochure', 'priority' => 'MEDIUM', 'scheduledDateTime' => '2026-10-30T15:00', 'assignedTo' => 2, 'description' => 'Email the east-row brochure'], ['ok' => true, 'data' => ['id' => 2]]),
             self::entry('Tasks', 'FR-6.4', 'Mark task done', 'POST', '/api/v1/tasks/1/done', true, 'followups.create', new \stdClass(), ['ok' => true, 'data' => ['id' => 1, 'status' => 'COMPLETED']]),
             self::entry('Tasks', 'FR-6.4', 'Reschedule task', 'POST', '/api/v1/tasks/1/reschedule', true, 'followups.create', ['scheduledDateTime' => '2026-10-31T15:00'], ['ok' => true, 'data' => ['id' => 1, 'status' => 'SCHEDULED']]),
