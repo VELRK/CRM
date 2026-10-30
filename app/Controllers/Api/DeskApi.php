@@ -463,7 +463,7 @@ class DeskApi extends BaseController
             return $denied;
         }
 
-        return $this->pageList($this->sites->projects($this->tenant()));
+        return $this->pageList($this->onlyTeamProjects($this->sites->projects($this->tenant()), 'id'));
     }
 
     public function saveProject(?int $id = null): ResponseInterface
@@ -473,6 +473,10 @@ class DeskApi extends BaseController
         }
 
         return $this->run(function () use ($id) {
+            if ($id !== null && ! $this->projectAllowed($id)) {
+                return $this->fail('That project is not on your team.', 404);
+            }
+
             return $this->ok(['id' => $this->sites->saveProject($this->tenant(), $id, $this->input())]);
         });
     }
@@ -484,6 +488,10 @@ class DeskApi extends BaseController
         }
 
         return $this->run(function () use ($id) {
+            if (! $this->projectAllowed($id)) {
+                return $this->fail('That project is not on your team.', 404);
+            }
+
             $this->sites->deleteProject($this->tenant(), $id);
 
             return $this->ok(['id' => $id, 'deleted' => true]);
@@ -500,6 +508,10 @@ class DeskApi extends BaseController
 
         if ($project === null) {
             return $this->fail('That project is not in this workspace.', 404);
+        }
+
+        if (! $this->projectAllowed($id)) {
+            return $this->fail('That project is not on your team.', 404);
         }
 
         $plots = ['available' => 0, 'hold' => 0, 'booked' => 0, 'sold' => 0, 'registered' => 0, 'blocked' => 0];
@@ -563,7 +575,7 @@ class DeskApi extends BaseController
             return true;
         }));
 
-        return $this->pageList($rows);
+        return $this->pageList($this->onlyTeamProjects($rows, 'project_id'));
     }
 
     public function savePlot(?int $id = null): ResponseInterface
@@ -576,6 +588,14 @@ class DeskApi extends BaseController
             $input = $this->input();
             $status = (string) ($input['status'] ?? 'available');
             $before = $id === null ? null : $this->sites->plot($this->tenant(), $id);
+
+            if ($before !== null && ! $this->projectAllowed((int) $before['project_id'])) {
+                return $this->fail('That project is not on your team.', 404);
+            }
+
+            if (! $this->projectAllowed((int) ($input['project_id'] ?? 0))) {
+                return $this->fail('That project is not on your team.', 404);
+            }
             $db = db_connect();
             $db->transException(true)->transStart();
             $input['by_user_id'] = $this->user();
@@ -606,6 +626,10 @@ class DeskApi extends BaseController
                 return $this->fail('That plot is not in this workspace.', 404);
             }
 
+            if (! $this->projectAllowed((int) $before['project_id'])) {
+                return $this->fail('That project is not on your team.', 404);
+            }
+
             $input['by_user_id'] = $this->user();
             $status = (string) ($input['status'] ?? $before['status']);
             $db = db_connect();
@@ -634,6 +658,12 @@ class DeskApi extends BaseController
         }
 
         return $this->run(function () use ($id) {
+            $plot = $this->sites->plot($this->tenant(), $id);
+
+            if ($plot === null || ! $this->projectAllowed((int) $plot['project_id'])) {
+                return $this->fail('That project is not on your team.', 404);
+            }
+
             $this->sites->deletePlot($this->tenant(), $id);
 
             return $this->ok(['id' => $id, 'deleted' => true]);
@@ -646,8 +676,10 @@ class DeskApi extends BaseController
             return $denied;
         }
 
-        if ($this->sites->plot($this->tenant(), $id) === null) {
-            return $this->fail('That plot is not in this workspace.', 404);
+        $plot = $this->sites->plot($this->tenant(), $id);
+
+        if ($plot === null || ! $this->projectAllowed((int) $plot['project_id'])) {
+            return $this->fail('That project is not on your team.', 404);
         }
 
         $rows = db_connect()->table('plot_status_history')->where('tenant_id', $this->tenant())->where('plot_id', $id)->orderBy('id', 'DESC')->get()->getResultArray();
@@ -661,9 +693,11 @@ class DeskApi extends BaseController
             return $denied;
         }
 
+        $rows = $this->onlyTeamProjects($this->sites->plots($this->tenant(), (int) $this->request->getGet('project')), 'project_id');
+
         return $this->csv('plots.csv', ['Project', 'Plot', 'Block', 'Area', 'Facing', 'Price', 'Commission', 'Status'], array_map(static fn (array $row): array => [
             $row['project_name'] ?? '', $row['plot_no'], $row['block'], $row['area_sqft'], $row['facing'], ((int) $row['price_minor']) / 100, ((int) ($row['commission_minor'] ?? 0)) / 100, $row['status'],
-        ], $this->sites->plots($this->tenant(), (int) $this->request->getGet('project'))));
+        ], $rows));
     }
 
     public function leads(): ResponseInterface
@@ -1153,6 +1187,19 @@ class DeskApi extends BaseController
         $scope = $this->estate->reportScope($this->tenant(), $this->user(), (string) $actor['role_name'], (bool) $actor['is_owner']);
         $board = $this->estate->dashboard($this->tenant(), $scope);
         $board['scope'] = $scope;
+        $allowed = $this->allowedProjectIds();
+
+        if ($allowed !== null) {
+            $names = [];
+
+            foreach ($this->sites->projects($this->tenant()) as $project) {
+                if (in_array((int) $project['id'], $allowed, true)) {
+                    $names[(string) $project['name']] = true;
+                }
+            }
+
+            $board['projects'] = array_values(array_filter($board['projects'] ?? [], static fn (array $row): bool => isset($names[(string) ($row['name'] ?? '')])));
+        }
 
         return $this->ok($board);
     }
@@ -1507,6 +1554,79 @@ class DeskApi extends BaseController
     /**
      * @return array{level: string, label: string, user_ids: ?list<int>, team_ids: ?list<int>}
      */
+    /**
+     * Null means every project. A list means the projects assigned to this person's teams.
+     *
+     * @return ?list<int>
+     */
+    private function allowedProjectIds(): ?array
+    {
+        if (($this->viewScope()['level'] ?? '') === 'company') {
+            return null;
+        }
+
+        $teamIds = [];
+        $scope = $this->viewScope();
+
+        if (is_array($scope['team_ids'] ?? null)) {
+            $teamIds = $scope['team_ids'];
+        }
+
+        $profile = db_connect()->table('staff_profiles')
+            ->select('team_id')
+            ->where('tenant_id', $this->tenant())
+            ->where('user_id', $this->user())
+            ->where('deleted_at', null)
+            ->get()
+            ->getRowArray();
+        $teamId = (int) ($profile['team_id'] ?? 0);
+
+        if ($teamId > 0) {
+            $teamIds[] = $teamId;
+        }
+
+        $memberships = db_connect()->table('team_memberships')
+            ->select('team_id')
+            ->where('tenant_id', $this->tenant())
+            ->where('user_id', $this->user())
+            ->where('to_on', null)
+            ->get()
+            ->getResultArray();
+
+        foreach ($memberships as $membership) {
+            $teamIds[] = (int) $membership['team_id'];
+        }
+
+        $teamIds = array_values(array_unique(array_filter($teamIds)));
+        $projectIds = $this->estate->projectIdsForTeams($this->tenant(), $teamIds);
+
+        return $projectIds === [] ? null : $projectIds;
+    }
+
+    private function projectAllowed(int $projectId): bool
+    {
+        $allowed = $this->allowedProjectIds();
+
+        return $allowed === null || in_array($projectId, $allowed, true);
+    }
+
+    /**
+     * @param list<array<string, mixed>> $rows
+     * @return list<array<string, mixed>>
+     */
+    private function onlyTeamProjects(array $rows, string $key): array
+    {
+        $allowed = $this->allowedProjectIds();
+
+        if ($allowed === null) {
+            return $rows;
+        }
+
+        $ids = array_flip($allowed);
+
+        return array_values(array_filter($rows, static fn (array $row): bool => isset($ids[(int) ($row[$key] ?? 0)])));
+    }
+
     private function viewScope(): array
     {
         $actor = $this->actor();

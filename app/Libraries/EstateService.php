@@ -183,7 +183,8 @@ class EstateService
             return [];
         }
 
-        return $this->db->table('teams t')
+        $this->ensureTeamProjects();
+        $rows = $this->db->table('teams t')
             ->select('t.*, u.name AS head_name')
             ->join('users u', 'u.id = t.head_user_id', 'left')
             ->where('t.tenant_id', $tenantId)
@@ -191,6 +192,28 @@ class EstateService
             ->orderBy('t.name', 'ASC')
             ->get()
             ->getResultArray();
+        $links = $this->db->table('team_projects tp')
+            ->select('tp.team_id, tp.project_id, p.name')
+            ->join('projects p', 'p.id = tp.project_id')
+            ->where('tp.tenant_id', $tenantId)
+            ->where('p.deleted_at', null)
+            ->orderBy('p.name', 'ASC')
+            ->get()
+            ->getResultArray();
+        $byTeam = [];
+
+        foreach ($links as $link) {
+            $byTeam[(int) $link['team_id']][] = $link;
+        }
+
+        foreach ($rows as &$team) {
+            $mine = $byTeam[(int) $team['id']] ?? [];
+            $team['project_ids'] = array_map(static fn (array $link): int => (int) $link['project_id'], $mine);
+            $team['projects'] = implode(', ', array_map(static fn (array $link): string => (string) $link['name'], $mine));
+        }
+        unset($team);
+
+        return $rows;
     }
 
     /**
@@ -230,6 +253,12 @@ class EstateService
 
         $this->syncMembers($tenantId, $id, array_values(array_unique(array_filter($memberIds))));
 
+        if (array_key_exists('project_ids', $input)) {
+            $projectIds = $input['project_ids'];
+            $projectIds = is_array($projectIds) ? array_map('intval', $projectIds) : [];
+            $this->syncTeamProjects($tenantId, $id, array_values(array_unique(array_filter($projectIds))));
+        }
+
         return $id;
     }
 
@@ -245,6 +274,8 @@ class EstateService
             'deleted_at' => date('Y-m-d H:i:s'),
             'updated_at' => date('Y-m-d H:i:s'),
         ]);
+        $this->ensureTeamProjects();
+        $this->db->table('team_projects')->where('tenant_id', $tenantId)->where('team_id', $id)->delete();
     }
 
     /**
@@ -303,6 +334,81 @@ class EstateService
             ->getResultArray();
 
         return array_map('intval', array_column($rows, 'user_id'));
+    }
+
+    /**
+     * @param list<int> $teamIds
+     * @return list<int>
+     */
+    public function projectIdsForTeams(int $tenantId, array $teamIds): array
+    {
+        $this->ensureTeamProjects();
+
+        if ($teamIds === []) {
+            return [];
+        }
+
+        $rows = $this->db->table('team_projects')
+            ->select('project_id')
+            ->where('tenant_id', $tenantId)
+            ->whereIn('team_id', $teamIds)
+            ->get()
+            ->getResultArray();
+
+        return array_values(array_unique(array_map(static fn (array $row): int => (int) $row['project_id'], $rows)));
+    }
+
+    /**
+     * @param list<int> $projectIds
+     */
+    private function syncTeamProjects(int $tenantId, int $teamId, array $projectIds): void
+    {
+        $this->ensureTeamProjects();
+        $valid = [];
+
+        if ($projectIds !== []) {
+            $rows = $this->db->table('projects')
+                ->select('id')
+                ->where('tenant_id', $tenantId)
+                ->where('deleted_at', null)
+                ->whereIn('id', $projectIds)
+                ->get()
+                ->getResultArray();
+            $valid = array_map(static fn (array $row): int => (int) $row['id'], $rows);
+        }
+
+        $this->db->table('team_projects')->where('tenant_id', $tenantId)->where('team_id', $teamId)->delete();
+
+        foreach ($valid as $projectId) {
+            $this->db->table('team_projects')->insert([
+                'tenant_id'  => $tenantId,
+                'team_id'    => $teamId,
+                'project_id' => $projectId,
+            ]);
+        }
+    }
+
+    private bool $teamProjectsReady = false;
+
+    private function ensureTeamProjects(): void
+    {
+        if ($this->teamProjectsReady) {
+            return;
+        }
+
+        if (! $this->db->tableExists('team_projects')) {
+            $forge = \Config\Database::forge();
+            $forge->addField([
+                'tenant_id'  => ['type' => 'INT', 'unsigned' => true],
+                'team_id'    => ['type' => 'INT', 'unsigned' => true],
+                'project_id' => ['type' => 'INT', 'unsigned' => true],
+            ]);
+            $forge->addKey(['tenant_id', 'team_id', 'project_id'], true);
+            $forge->createTable('team_projects');
+            $this->db->resetDataCache();
+        }
+
+        $this->teamProjectsReady = true;
     }
 
     /**

@@ -45,12 +45,12 @@ class ApiCatalog
                 'phone' => '9840000000', 'status' => 'active', 'team_id' => 1, 'attendance_applicable' => 1, 'lead_eligible' => 1, 'incentive_eligible' => 1,
             ], ['ok' => true, 'data' => ['user_id' => 1]]),
             self::entry('Staff', 'FR-1.4', 'Open work before relieving', 'GET', '/api/v1/staff/1/open-work', true, 'staff.view', null, ['ok' => true, 'data' => ['leads' => [$lead], 'followups' => [['id' => 4, 'lead_name' => 'Mr. Ravi Kumar', 'call_subject' => 'Site visit', 'display_status' => 'SCHEDULED']]]]),
-            self::entry('Teams', 'FR-1.2', 'List teams', 'GET', '/api/v1/teams', true, 'teams.view', null, ['ok' => true, 'data' => [['id' => 1, 'name' => 'East wing', 'head_user_id' => 1, 'head_name' => 'Priya', 'member_ids' => [1, 2], 'members' => 'Priya, Anitha Joseph']]]),
+            self::entry('Teams', 'FR-1.2', 'List teams', 'GET', '/api/v1/teams', true, 'teams.view', null, ['ok' => true, 'data' => [['id' => 1, 'name' => 'East wing', 'head_user_id' => 1, 'head_name' => 'Priya', 'project_ids' => [1], 'projects' => 'Green Meadows', 'member_ids' => [1, 2], 'members' => 'Priya, Anitha Joseph']]]),
             self::entry('Teams', 'FR-1.2', 'Create team', 'POST', '/api/v1/teams', true, 'teams.manage', [
-                'name' => 'East wing', 'head_user_id' => 1, 'member_ids' => [1],
+                'name' => 'East wing', 'head_user_id' => 1, 'member_ids' => [1], 'project_ids' => [1],
             ], ['ok' => true, 'data' => ['id' => 1]]),
             self::entry('Teams', 'FR-1.2', 'Update team', 'POST', '/api/v1/teams/1', true, 'teams.manage', [
-                'name' => 'East wing', 'head_user_id' => 1, 'member_ids' => [1],
+                'name' => 'East wing', 'head_user_id' => 1, 'member_ids' => [1], 'project_ids' => [1],
             ], ['ok' => true, 'data' => ['id' => 1]]),
             self::entry('Teams', 'FR-1.3', 'Membership history', 'GET', '/api/v1/teams/1/history', true, 'teams.view', null, ['ok' => true, 'data' => [['user_id' => 1, 'name' => 'Priya', 'from_on' => '2026-10-01', 'to_on' => null]]]),
 

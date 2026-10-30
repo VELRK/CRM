@@ -26,7 +26,7 @@ const lists = {
     settings: { path: '/api/v1/company', kind: 'company', lede: 'Company name, email, address, and logo.', columns: [] },
     staff: { path: '/api/v1/staff', lede: 'People in this workspace. The company is the one you are signed into.', columns: [col('Name', 'name'), col('Email', 'email'), col('Phone', 'phone_number'), col('Role', 'role_name'), col('Profile', 'profile'), col('Status', 'status')], actions: ['user', 'staff-edit'] },
     roles: { path: '/api/v1/roles', lede: 'Roles for this workspace. Access is ticked on the role.', columns: [col('Role', 'name'), col('People', 'member_count'), col('Access', 'access_count')], actions: ['role', 'role-delete'] },
-    teams: { path: '/api/v1/teams', lede: 'Teams and who leads them.', columns: [col('Team', 'name'), col('Head', 'head_name'), col('Members', 'members')], actions: ['team', 'team-delete'] },
+    teams: { path: '/api/v1/teams', lede: 'Teams, who leads them, and which projects they work.', columns: [col('Team', 'name'), col('Head', 'head_name'), col('Projects', 'projects'), col('Members', 'members')], actions: ['team', 'team-delete'] },
     projects: { path: '/api/v1/projects', kind: 'sites', start: 'dashboard', lede: '', columns: [] },
     plots: { path: '/api/v1/plots', kind: 'sites', start: 'inventory', lede: '', columns: [] },
     leads: { path: '/api/v1/leads', kind: 'leads', lede: '', columns: [], actions: ['lead', 'followup', 'visit', 'task', 'assign'] },
@@ -1542,27 +1542,32 @@ function StaffForm({ person, onDone, onClose }) {
     <//>`;
 }
 function TeamForm({ team, onDone, onClose }) {
-    const [form, setForm] = useState({ name: team?.name || '', head_user_id: team?.head_user_id ? String(team.head_user_id) : '', member_ids: (team?.member_ids || []).map(String) });
+    const [form, setForm] = useState({ name: team?.name || '', head_user_id: team?.head_user_id ? String(team.head_user_id) : '', member_ids: (team?.member_ids || []).map(String), project_ids: (team?.project_ids || []).map(String) });
     const [people, setPeople] = useState([]);
+    const [projects, setProjects] = useState([]);
     const [error, setError] = useState('');
-    useEffect(() => { call('/api/v1/staff').then((rows) => setPeople(Array.isArray(rows) ? rows : [])).catch(() => {}); }, []);
-    function toggle(id) {
-        const current = form.member_ids;
-        setForm({ ...form, member_ids: current.includes(id) ? current.filter((item) => item !== id) : [...current, id] });
+    useEffect(() => {
+        call('/api/v1/staff').then((rows) => setPeople(Array.isArray(rows) ? rows : [])).catch(() => {});
+        call('/api/v1/projects').then((rows) => setProjects(Array.isArray(rows) ? rows : [])).catch(() => {});
+    }, []);
+    function toggle(key, id) {
+        const current = form[key];
+        setForm({ ...form, [key]: current.includes(id) ? current.filter((item) => item !== id) : [...current, id] });
     }
     async function submit(event) {
         event.preventDefault();
         setError('');
         try {
             const path = team?.id ? '/api/v1/teams/' + team.id : '/api/v1/teams';
-            await call(path, { method: 'POST', body: { name: form.name, head_user_id: Number(form.head_user_id || 0), member_ids: form.member_ids.map(Number) } });
+            await call(path, { method: 'POST', body: { name: form.name, head_user_id: Number(form.head_user_id || 0), member_ids: form.member_ids.map(Number), project_ids: form.project_ids.map(Number) } });
             onDone();
         } catch (e) { setError(e.message); }
     }
     return html`<${FormCard} title=${team?.id ? 'Edit team' : 'Add team'} error=${error} onSubmit=${submit} onClose=${onClose}>
         ${field('Team', inputOf(form, 'name', setForm), true)}
         ${field('Head', selectOf(form, 'head_user_id', setForm, [['', 'Choose'], ...people.map((row) => [String(row.user_id), row.name])]), true)}
-        <div class="span-2 pick-list">${people.map((row) => html`<label key=${row.user_id}><input type="checkbox" checked=${form.member_ids.includes(String(row.user_id))} onChange=${() => toggle(String(row.user_id))} />${row.name}</label>`)}</div>
+        <div class="span-2"><span class="req">Projects</span><div class="pick-list">${projects.map((row) => html`<label key=${row.id}><input type="checkbox" checked=${form.project_ids.includes(String(row.id))} onChange=${() => toggle('project_ids', String(row.id))} />${row.name}</label>`)}</div></div>
+        <div class="span-2 pick-list">${people.map((row) => html`<label key=${row.user_id}><input type="checkbox" checked=${form.member_ids.includes(String(row.user_id))} onChange=${() => toggle('member_ids', String(row.user_id))} />${row.name}</label>`)}</div>
     <//>`;
 }
 function TemplateForm({ onDone, onClose }) {
