@@ -102,7 +102,7 @@ class ApiCatalog
             self::entry('Attendance', 'FR-9.1', 'Save a location category', 'POST', '/api/v1/attendance/categories', true, 'attendance.correct', ['name' => 'Site', 'status' => 'active'], ['ok' => true, 'data' => ['id' => 1]]),
             self::entry('Attendance', 'FR-9.1', 'Attendance locations', 'GET', '/api/v1/attendance/locations', true, 'attendance.view', null, ['ok' => true, 'data' => [['id' => 1, 'name' => 'North gate', 'category_name' => 'Site', 'radius_metres' => 150, 'status' => 'active', 'entity_type' => 'project', 'entity_id' => 1]]]),
             self::entry('Attendance', 'FR-9.1', 'Save an attendance location', 'POST', '/api/v1/attendance/locations', true, 'attendance.correct', [
-                'name' => 'North gate', 'category_name' => 'Site', 'address' => 'North gate', 'latitude' => '11.0168000', 'longitude' => '76.9558000', 'radius_metres' => 150, 'work_start' => '09:00', 'work_end' => '18:00', 'accuracy_metres' => 50, 'status' => 'active', 'entity_type' => 'project', 'entity_id' => 1, 'user_ids' => [1],
+                'name' => 'North gate', 'category_name' => 'Site', 'address' => 'North gate', 'latitude' => '11.0168000', 'longitude' => '76.9558000', 'radius_metres' => 150, 'work_start' => '09:00', 'work_end' => '18:00', 'accuracy_metres' => 50, 'status' => 'active', 'entity_type' => 'project', 'entity_id' => 1,
             ], ['ok' => true, 'data' => ['id' => 1]]),
             self::entry('Attendance', 'FR-9.3', 'Attendance sessions', 'GET', '/api/v1/attendance/sessions?date=2026-10-29', true, 'attendance.view', null, ['ok' => true, 'data' => [['user_name' => 'Priya', 'location_name' => 'North gate', 'category_name' => 'Site', 'check_status' => 'open']]]),
 

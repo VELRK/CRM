@@ -2733,7 +2733,7 @@ function MapPick({ lat, lng, onPick }) {
 function blankPlace() {
     return { id: 0, name: '', category_id: '', category_name: '', address: '', latitude: '', longitude: '', radius_metres: '', work_start: '', work_end: '', accuracy_metres: '', status: 'active', entity_type: '', entity_id: '', user_ids: [] };
 }
-function LocationDesk({ people }) {
+function LocationDesk() {
     const [categories, setCategories] = useState([]);
     const [places, setPlaces] = useState([]);
     const [projects, setProjects] = useState([]);
@@ -2765,7 +2765,7 @@ function LocationDesk({ people }) {
     }
     return html`<section class="panel-card stack">
         <h3>Attendance locations</h3>
-        <p class="lede">Add a category, then a place. Each place has its own point, radius in metres, working hours, and the people who may check in there.</p>
+        <p class="lede">Add a category, then a place. Link it to a project when it belongs to one. Anyone who can mark attendance can check in there.</p>
         ${error ? html`<p class="error">${error}</p>` : null}
         <form class="site-tools" onSubmit=${saveCategory}>
             <label>Category<input value=${categoryName} onInput=${(event) => setCategoryName(event.target.value)} placeholder="Category name" required /></label>
@@ -2784,10 +2784,10 @@ function LocationDesk({ people }) {
                 <td><button class="ghost" type="button" onClick=${() => setEditing({ ...blankPlace(), ...row, category_id: String(row.category_id || ''), entity_id: row.entity_type === 'project' && row.entity_id ? String(row.entity_id) : '', entity_type: row.entity_type || '', accuracy_metres: row.accuracy_metres == null ? '' : String(row.accuracy_metres), radius_metres: String(row.radius_metres || ''), user_ids: row.user_ids || [] })}>Edit</button></td>
             </tr>`)}
         </tbody></table></div>
-        ${editing ? html`<${LocationForm} place=${editing} categories=${categories} projects=${projects} people=${people} onDone=${() => { setEditing(null); load(); }} onClose=${() => setEditing(null)} />` : null}
+        ${editing ? html`<${LocationForm} place=${editing} categories=${categories} projects=${projects} onDone=${() => { setEditing(null); load(); }} onClose=${() => setEditing(null)} />` : null}
     </section>`;
 }
-function LocationForm({ place, categories, projects, people, onDone, onClose }) {
+function LocationForm({ place, categories, projects, onDone, onClose }) {
     const [form, setForm] = useState(place);
     const [error, setError] = useState('');
     const set = (key) => (event) => setForm({ ...form, [key]: event.target.value });
@@ -2810,7 +2810,6 @@ function LocationForm({ place, categories, projects, people, onDone, onClose }) 
                 status: form.status || 'active',
                 entity_type: form.entity_id ? 'project' : '',
                 entity_id: form.entity_id ? Number(form.entity_id) : 0,
-                user_ids: form.user_ids || [],
             } });
             onDone();
         } catch (e) { setError(e.message); }
@@ -2828,6 +2827,7 @@ function LocationForm({ place, categories, projects, people, onDone, onClose }) 
         ${field('GPS accuracy (metres)', html`<input type="number" min="0" max="5000" step="1" value=${form.accuracy_metres || ''} onInput=${set('accuracy_metres')} placeholder="Empty skips this check" />`)}
         ${field('Status', html`<select value=${form.status || 'active'} onChange=${set('status')}><option value="active">Active</option><option value="inactive">Inactive</option></select>`)}
         ${field('Linked project', html`<select value=${form.entity_id || ''} onChange=${set('entity_id')}><option value="">None</option>${projects.map((row) => html`<option key=${row.id} value=${String(row.id)}>${row.name}</option>`)}</select>`, true)}
+        <p class="muted span-2">Anyone who can mark attendance can check in at this place. They still have to be inside the radius.</p>
         <div class="span-2 row-actions"><button class="ghost" type="button" onClick=${async () => {
             setError('');
             try {
@@ -2836,11 +2836,6 @@ function LocationForm({ place, categories, projects, people, onDone, onClose }) 
             } catch (e) { setError(e.message); }
         }}>Use my current location</button></div>
         <${MapPick} lat=${form.latitude || ''} lng=${form.longitude || ''} onPick=${(lat, lng) => setForm({ ...form, latitude: lat, longitude: lng })} />
-        <div class="span-2"><span class="field">People who can check in here</span><div class="pick-list">${people.filter((person) => person.status !== 'inactive' && person.status !== 'relieved').map((person) => html`<label key=${person.user_id}><input type="checkbox" checked=${(form.user_ids || []).map(String).includes(String(person.user_id))} onChange=${() => {
-            const id = Number(person.user_id);
-            const ids = (form.user_ids || []).map(Number);
-            setForm({ ...form, user_ids: ids.includes(id) ? ids.filter((item) => item !== id) : [...ids, id] });
-        }} />${person.name}</label>`)}</div></div>
     <//>`;
 }
 function AttendanceBoard({ user }) {
@@ -2916,7 +2911,7 @@ function AttendanceBoard({ user }) {
             ${canCorrect ? html`<button class="ghost" type="button" onClick=${() => setShowPlaces(!showPlaces)}>${showPlaces ? 'Hide locations' : 'Locations'}</button>` : null}
             ${canMark ? html`<button class="primary" type="button" onClick=${() => { const person = staff.find((row) => String(row.user_id) === String(user.id)) || (canCorrect ? staff[0] : null); if (person) openMark(person, today); else setError('No staff row is available to mark.'); }}>Mark attendance</button>` : null}
         </div>
-        ${showPlaces ? html`<${LocationDesk} people=${people} />` : null}
+        ${showPlaces ? html`<${LocationDesk} />` : null}
         <div class="attend-layout">
             <section class="panel-card">
                 <h3>${months[month - 1]} ${year}</h3>

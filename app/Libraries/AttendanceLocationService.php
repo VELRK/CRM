@@ -281,24 +281,17 @@ class AttendanceLocationService
     }
 
     /**
-     * Assigned active places for one person, with distance when GPS is sent.
+     * Active places in this workspace. Any person who can mark attendance may use them.
      *
      * @return list<array<string, mixed>>
      */
     public function places(int $tenantId, int $userId, ?string $lat, ?string $lng): array
     {
-        $assignments = $this->assignments($tenantId);
         $today = $this->todaySessions($tenantId, $userId);
         $cards = [];
 
         foreach ($this->locations($tenantId, false) as $row) {
             if ((string) $row['status'] !== 'active' || (string) ($row['category_status'] ?? '') !== 'active') {
-                continue;
-            }
-
-            $people = $assignments[(int) $row['id']] ?? [];
-
-            if (! in_array($userId, $people, true)) {
                 continue;
             }
 
@@ -362,7 +355,7 @@ class AttendanceLocationService
     }
 
     /**
-     * Active places an admin can pick, or the signed-in person's assigned places.
+     * Active places anyone in the workspace can use for check-in.
      *
      * @return list<array<string, mixed>>
      */
@@ -397,7 +390,6 @@ class AttendanceLocationService
                 throw new RuntimeException('This attendance location is not active.');
             }
 
-            $this->assertAssigned($tenantId, $userId, (int) $location['id']);
             $this->assertInside($location, $input['lat'] ?? null, $input['lng'] ?? null, $input['accuracy'] ?? null);
 
             if ($action === 'in') {
@@ -519,19 +511,6 @@ class AttendanceLocationService
         }
 
         return $now > $start ? 'late' : 'present';
-    }
-
-    private function assertAssigned(int $tenantId, int $userId, int $locationId): void
-    {
-        $found = $this->db->table('attendance_location_users')
-            ->where('tenant_id', $tenantId)
-            ->where('location_id', $locationId)
-            ->where('user_id', $userId)
-            ->countAllResults();
-
-        if ($found < 1) {
-            throw new RuntimeException('This attendance location is not assigned to you.');
-        }
     }
 
     /**
