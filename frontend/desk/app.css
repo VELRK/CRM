@@ -40,7 +40,8 @@ textarea { min-height: 160px; font-family: ui-monospace, Consolas, monospace; fo
 .sidebar { background: #fff; border-right: 1px solid #e6ebe6; position: sticky; top: 0; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
 .nav-scroll { flex: 1; overflow: auto; padding: 14px 12px 8px; }
 .nav-group { margin: 0 0 16px; }
-.sidebar .sign-out { flex: none; margin: 0; border: 0; border-top: 1px solid #eef1f6; border-radius: 0; min-height: 52px; background: #fff; color: #111; font-weight: 600; }
+.sidebar .nav-pin, .sidebar .sign-out { flex: none; margin: 0; border: 0; border-top: 1px solid #eef1f6; border-radius: 0; min-height: 48px; background: #fff; color: #111; font-weight: 600; }
+.sidebar .sign-out { min-height: 52px; }
 .brand { display: flex; gap: 12px; align-items: center; padding: 18px 16px; border-bottom: 1px solid #eef1f6; flex: none; }
 .brand-mark { width: 36px; height: 36px; border-radius: 8px; background: var(--primary); color: #fff; display: grid; place-items: center; font-weight: 700; font-size: 16px; }
 .brand strong { display: block; font-size: 16px; line-height: 1.2; }
@@ -265,6 +266,7 @@ button.heat-cell { height: 22px; border-radius: 4px; border: 0; padding: 0; widt
 .field { display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 600; }
 .span-2 { grid-column: span 2; }
 .modal-back { position: fixed; inset: 0; z-index: 30; background: rgba(17, 24, 39, .35); display: grid; place-items: center; padding: 24px; }
+.heat-modal { z-index: 80; }
 .filter-box, .xcrm { background: #fff; border-radius: 12px; }
 .filter-box { width: min(420px, 100%); }
 .filter-box.wide { width: min(980px, 100%); }

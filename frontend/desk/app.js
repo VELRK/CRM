@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'https://esm.sh/react@18.3.1';
 import { createRoot } from 'https://esm.sh/react-dom@18.3.1/client';
+import { createPortal } from 'https://esm.sh/react-dom@18.3.1';
 import htm from 'https://esm.sh/htm@3.1.1';
 
 const html = htm.bind(React.createElement);
@@ -17,7 +18,6 @@ const nav = [
     ['Sales', [['Leads', 'leads'], ['Follow-ups', 'followups'], ['Visits', 'visits'], ['Tasks', 'tasks']]],
     ['Office', [['Attendance', 'attendance'], ['Incentives', 'incentives']]],
     ['Insight', [['Activity', 'activity'], ['Notifications', 'notifications'], ['WhatsApp', 'whatsapp'], ['API console', 'api']]],
-    ['Settings', [['Settings', 'settings']]],
 ];
 const modules = nav.flatMap((group) => group[1]);
 
@@ -1745,7 +1745,15 @@ function Heatmap({ visits, followups }) {
     const max = Math.max(1, ...Object.values(counts), 0);
     const names = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
     const picked = pick ? items.filter((item) => item.day === pick.day && item.hour === pick.hour) : [];
-    return html`<div>
+    const popup = pick ? html`<div class="modal-back heat-modal" onClick=${() => setPick(null)}>
+            <div class="filter-box" onClick=${(event) => event.stopPropagation()}>
+                <header><h2>${pick.label}</h2><button class="filter-x" type="button" onClick=${() => setPick(null)} aria-label="Close">×</button></header>
+                <div class="filter-body heat-pop">
+                    ${picked.length === 0 ? html`<p>Nothing is booked in this hour.</p>` : picked.map((item) => html`<article key=${item.key}><strong>${item.title}</strong><em>${item.kind}${item.when ? ' · ' + item.when : ''}</em><p>${item.note || '—'}</p></article>`)}
+                </div>
+            </div>
+        </div>` : null;
+    return html`<div class="heat-wrap">
     <div class="heat" role="img" aria-label="Visits and follow-ups by day and hour">
         <span></span>
         ${days.map((date) => html`<span class="heat-head" key=${dayKey(date)}>${names[date.getDay()]}<b>${date.getDate()}</b></span>`)}
@@ -1759,14 +1767,7 @@ function Heatmap({ visits, followups }) {
             })}
         </div>`)}
     </div>
-        ${pick ? html`<div class="modal-back" onClick=${() => setPick(null)}>
-            <div class="filter-box" onClick=${(event) => event.stopPropagation()}>
-                <header><h2>${pick.label}</h2><button class="filter-x" type="button" onClick=${() => setPick(null)} aria-label="Close">×</button></header>
-                <div class="filter-body heat-pop">
-                    ${picked.length === 0 ? html`<p>Nothing is booked in this hour.</p>` : picked.map((item) => html`<article key=${item.key}><strong>${item.title}</strong><em>${item.kind}${item.when ? ' · ' + item.when : ''}</em><p>${item.note || '—'}</p></article>`)}
-                </div>
-            </div>
-        </div>` : null}
+    ${popup ? createPortal(popup, document.body) : null}
     </div>`;
 }
 function Home({ onOpen }) {
@@ -2799,8 +2800,8 @@ function App() {
     if (!ready) return html`<main class="login"><p>Opening Atrium…</p></main>`;
     if (!user) return html`<${Login} onIn=${setUser} />`;
     const spec = lists[screen];
-    const title = modules.find((item) => item[1] === screen)?.[0] || 'CRM';
-    const section = nav.find((group) => group[1].some((item) => item[1] === screen));
+    const title = screen === 'settings' ? 'Settings' : (modules.find((item) => item[1] === screen)?.[0] || 'CRM');
+    const section = screen === 'settings' ? ['Settings'] : nav.find((group) => group[1].some((item) => item[1] === screen));
     const initial = String(user.name || 'A').slice(0, 1);
     return html`<div class="shell">
         <aside class="sidebar">
@@ -2811,6 +2812,7 @@ function App() {
                     ${items.map(([text, id]) => html`<button key=${id} class=${screen === id ? 'active' : ''} onClick=${() => setScreen(id)}>${text}</button>`)}
                 </section>`)}
             </div>
+            <button class=${screen === 'settings' ? 'nav-pin active' : 'nav-pin'} type="button" onClick=${() => setScreen('settings')}>Settings</button>
             <button class="sign-out" onClick=${() => { localStorage.removeItem(tokenKey); setUser(null); }}>Sign out</button>
         </aside>
         <div class="workspace">
