@@ -6,14 +6,18 @@
         <h1>WhatsApp</h1>
         <p class="lede">Templates are stored per workspace. A send from a lead is saved on that lead. Delivery stays off until Askeva is connected, so nothing is sent automatically.</p>
     </div>
-    <button class="primary" type="button" data-modal="template-modal" data-title="New template" data-name="" data-language="en" data-body=""><?= icon('plus') ?> Template</button>
+    <?php if (in_array('whatsapp.manage', $can, true)) : ?>
+        <button class="primary" type="button" data-modal="template-modal" data-title="New template" data-name="" data-language="en" data-body=""><?= icon('plus') ?> Template</button>
+    <?php endif; ?>
 </header>
+<?php if (in_array('whatsapp.manage', $can, true)) : ?>
 <form method="post" action="<?= site_url('app/whatsapp/settings') ?>" class="panel stack">
     <?= csrf_field() ?>
     <label>Business number <input name="whatsapp_phone" value="<?= esc($phone) ?>"></label>
     <label>Askeva token <input name="whatsapp_token" type="password" placeholder="Leave blank to keep the saved token"></label>
     <button class="ghost" type="submit">Save connection</button>
 </form>
+<?php endif; ?>
 <div class="table-wrap">
     <table class="data">
         <thead><tr><th>Template</th><th>Language</th><th>Message</th></tr></thead>

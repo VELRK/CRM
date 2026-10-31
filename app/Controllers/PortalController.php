@@ -86,7 +86,7 @@ abstract class PortalController extends BaseController
 
     protected function can(string $key): bool
     {
-        return in_array($key, $this->permissions, true);
+        return $this->isOwner || in_array($key, $this->permissions, true);
     }
 
     protected function denyUnless(string $key): ?\CodeIgniter\HTTP\RedirectResponse
@@ -112,7 +112,7 @@ abstract class PortalController extends BaseController
         }
 
         return view($view, array_merge($data, [
-            'can'                => $this->permissions,
+            'can'                => $this->isOwner ? AccessCatalog::keys() : $this->permissions,
             'isOwner'            => $this->isOwner,
             'active'             => $data['active'] ?? '',
             'unread'             => $this->desk->unreadCount($this->tenantId, $this->userId),

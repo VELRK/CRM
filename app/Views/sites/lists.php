@@ -6,7 +6,9 @@
         <h1>Lists</h1>
         <p class="lede">Lead statuses, plot statuses and sources are edited here. They are not hard-coded in the screens.</p>
     </div>
-    <button class="primary" type="button" data-modal="lookup-modal" data-action="<?= site_url('app/lists') ?>" data-title="Add list item" data-kind="lead_source" data-code="" data-label="" data-sort_order="10"><?= icon('plus') ?> Add</button>
+    <?php if (in_array('workspace.settings', $can, true)) : ?>
+        <button class="primary" type="button" data-modal="lookup-modal" data-action="<?= site_url('app/lists') ?>" data-title="Add list item" data-kind="lead_source" data-code="" data-label="" data-sort_order="10"><?= icon('plus') ?> Add</button>
+    <?php endif; ?>
 </header>
 <div class="table-wrap">
     <table class="data">
@@ -20,7 +22,9 @@
                 <td><?= (int) $item['sort_order'] ?></td>
                 <td><?= (int) $item['active'] === 1 ? 'Yes' : 'No' ?></td>
                 <td class="actions-cell">
-                    <button class="ghost" type="button" data-modal="lookup-modal" data-action="<?= site_url('app/lists/' . $item['id']) ?>" data-title="Edit list item" data-kind="<?= esc($item['kind'], 'attr') ?>" data-code="<?= esc($item['code'], 'attr') ?>" data-label="<?= esc($item['label'], 'attr') ?>" data-sort_order="<?= (int) $item['sort_order'] ?>"><?= icon('square-pen') ?></button>
+                    <?php if (in_array('workspace.settings', $can, true)) : ?>
+                        <button class="ghost" type="button" data-modal="lookup-modal" data-action="<?= site_url('app/lists/' . $item['id']) ?>" data-title="Edit list item" data-kind="<?= esc($item['kind'], 'attr') ?>" data-code="<?= esc($item['code'], 'attr') ?>" data-label="<?= esc($item['label'], 'attr') ?>" data-sort_order="<?= (int) $item['sort_order'] ?>"><?= icon('square-pen') ?></button>
+                    <?php endif; ?>
                 </td>
             </tr>
         <?php endforeach; ?>

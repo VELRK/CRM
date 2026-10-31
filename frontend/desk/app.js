@@ -10,6 +10,26 @@ const appRoot = new URL('..', import.meta.url).pathname.replace(/\/$/, '');
 function apiPath(path) {
     return typeof path === 'string' && path.startsWith('/') ? appRoot + path : path;
 }
+function allows(user, key) {
+    return !!(user && key && (user.permissions || []).includes(key));
+}
+const screenAccess = {
+    reports: 'reports.view',
+    staff: 'staff.view',
+    roles: 'team.view',
+    teams: 'teams.view',
+    projects: 'projects.view',
+    leads: 'leads.view',
+    followups: 'followups.view',
+    visits: 'visits.view',
+    tasks: 'followups.view',
+    attendance: 'attendance.view',
+    locations: 'attendance.view',
+    incentives: 'incentives.view',
+    activity: 'team.view',
+    whatsapp: 'leads.view',
+    settings: 'workspace.settings',
+};
 
 const nav = [
     ['Menu', [['CRM', 'home'], ['Reports', 'reports']]],
@@ -248,7 +268,7 @@ function downloadSheet(title, headers, body) {
     link.click();
     URL.revokeObjectURL(link.href);
 }
-function Grid({ title, note, columns, rows, query = '', filters = false, onRow, active, onEdit, onDelete }) {
+function Grid({ title, note, columns, rows, query = '', filters = false, onRow, active, onEdit, onDelete, canExport = false }) {
     const [text, setText] = useState('');
     const [pick, setPick] = useState('');
     const [from, setFrom] = useState('');
@@ -304,7 +324,7 @@ function Grid({ title, note, columns, rows, query = '', filters = false, onRow, 
             <div><h2>${title}</h2>${note ? html`<p class="lede">${note}</p>` : null}</div>
             <div class="row-actions">
                 <span class="muted">${shownChosen.length ? shownChosen.length + ' selected' : (filtering ? shown.length + ' of ' + rows.length : rows.length + ' rows')}</span>
-                <button class="ghost" title=${shownChosen.length ? 'Export the selected rows' : 'Export the rows that match the filter'} onClick=${exportSheet}>Excel</button>
+                ${canExport ? html`<button class="ghost" title=${shownChosen.length ? 'Export the selected rows' : 'Export the rows that match the filter'} onClick=${exportSheet}>Excel</button>` : null}
             </div>
         </header>
         ${filters ? html`<div class="filters">
@@ -315,7 +335,7 @@ function Grid({ title, note, columns, rows, query = '', filters = false, onRow, 
             ${numberColumn ? html`<input type="number" min="0" placeholder=${'Min ' + numberColumn.label.toLowerCase()} value=${min} onInput=${(event) => setMin(event.target.value)} />` : null}
             ${filtering ? html`<button class="ghost" type="button" onClick=${clearFilters}>Clear</button>` : null}
         </div>` : null}
-        ${shownChosen.length ? html`<div class="bulk"><span>${shownChosen.length} selected for bulk action</span><button class="ghost" onClick=${exportSheet}>Export selected</button><button class="ghost" onClick=${() => setSelected({})}>Clear</button></div>` : null}
+        ${shownChosen.length ? html`<div class="bulk"><span>${shownChosen.length} selected for bulk action</span>${canExport ? html`<button class="ghost" onClick=${exportSheet}>Export selected</button>` : null}<button class="ghost" onClick=${() => setSelected({})}>Clear</button></div>` : null}
         <div class="table-card"><table class="grid-table">
             <thead><tr>
                 <th class="check"><input ref=${boxRef} type="checkbox" checked=${allOn} aria-label="Select all" onChange=${markAll} /></th>
@@ -820,7 +840,7 @@ function FilterDialog({ title, draft, setDraft, activity, stages, sources, proje
         </form>
     </div>`;
 }
-function Board({ kind, title, rows, onReload, onRow, onOpen, onEdit, onDelete, active }) {
+function Board({ kind, title, rows, onReload, onRow, onOpen, onEdit, onDelete, active, user }) {
     const [text, setText] = useState('');
     const [filters, setFilters] = useState(blankFilter);
     const [draft, setDraft] = useState(blankFilter);
@@ -888,12 +908,14 @@ function Board({ kind, title, rows, onReload, onRow, onOpen, onEdit, onDelete, a
         } catch (e) { setError(e.message); }
     }
     const [savingMove, saveMove] = useSubmitLock(reschedule);
+    const canDone = kind === 'visits' ? allows(user, 'visits.attend') : allows(user, 'followups.create');
+    const canMove = kind === 'visits' ? allows(user, 'visits.create') : allows(user, 'followups.create');
     function actions(row) {
         const closed = ['COMPLETED', 'CANCELLED'].includes(String(row.display_status || '').toUpperCase());
-        if (closed) return null;
+        if (closed || (!canDone && !canMove)) return null;
         return html`<div class="row-actions" onClick=${(event) => event.stopPropagation()}>
-            <button class="act-done" disabled=${busy === row.id} onClick=${(event) => done(row, event)}>Mark Done</button>
-            <button class="act-later" onClick=${() => { setMove(row); setWhen(''); }}>Reschedule</button>
+            ${canDone ? html`<button class="act-done" disabled=${busy === row.id} onClick=${(event) => done(row, event)}>Mark Done</button>` : null}
+            ${canMove ? html`<button class="act-later" onClick=${() => { setMove(row); setWhen(''); }}>Reschedule</button>` : null}
         </div>`;
     }
     return html`<article class="board">
@@ -948,9 +970,9 @@ function Board({ kind, title, rows, onReload, onRow, onOpen, onEdit, onDelete, a
         <div class="table-card"><table class="board-table">
             <thead><tr>
                 ${kind === 'leads' ? html`<th>Lead name</th><th>Phone no</th><th>Project</th><th>Assigned to</th><th>Lead stage</th><th>Lead source</th><th>Modified date</th><th>Created on</th>${onEdit || onDelete ? html`<th></th>` : null}` : null}
-                ${kind === 'calls' ? html`<th>Lead name</th><th>Phone number</th><th>Schedule date</th><th>Subject</th><th>Assigned to</th><th>Assigned by</th><th>Created on</th><th>Status</th><th></th>` : null}
-                ${kind === 'visits' ? html`<th>Lead name</th><th>Project</th><th>Schedule date</th><th>Assigned to</th><th>Assigned by</th><th>Created on</th><th>Status</th><th></th>` : null}
-                ${kind === 'tasks' ? html`<th>Lead name</th><th>Subject</th><th>Priority</th><th>Start time</th><th>Assigned to</th><th>Created on</th><th>Status</th><th></th>` : null}
+                ${kind === 'calls' ? html`<th>Lead name</th><th>Phone number</th><th>Schedule date</th><th>Subject</th><th>Assigned to</th><th>Assigned by</th><th>Created on</th><th>Status</th>${canDone || canMove ? html`<th></th>` : null}` : null}
+                ${kind === 'visits' ? html`<th>Lead name</th><th>Project</th><th>Schedule date</th><th>Assigned to</th><th>Assigned by</th><th>Created on</th><th>Status</th>${canDone || canMove ? html`<th></th>` : null}` : null}
+                ${kind === 'tasks' ? html`<th>Lead name</th><th>Subject</th><th>Priority</th><th>Start time</th><th>Assigned to</th><th>Created on</th><th>Status</th>${canDone || canMove ? html`<th></th>` : null}` : null}
             </tr></thead>
             <tbody>
                 ${shown.length === 0 ? html`<tr><td colSpan="9">Nothing here yet.</td></tr>` : shown.map((row) => html`<tr key=${row.id} class=${active === row ? 'active' : ''} onClick=${() => { onRow && onRow(row); if (onOpen) onOpen(row); }}>
@@ -976,7 +998,7 @@ function Board({ kind, title, rows, onReload, onRow, onOpen, onEdit, onDelete, a
                         <td><${Person} name=${row.assigned_by_name} /></td>
                         <td>${prettyWhen(row.created_at)}</td>
                         <td><${StatusPill} value=${row.display_status} /></td>
-                        <td>${actions(row)}</td>` : null}
+                        ${canDone || canMove ? html`<td>${actions(row)}</td>` : null}` : null}
                     ${kind === 'visits' ? html`
                         <td>${row.lead_name || '—'}</td>
                         <td>${row.project_name || '—'}</td>
@@ -985,7 +1007,7 @@ function Board({ kind, title, rows, onReload, onRow, onOpen, onEdit, onDelete, a
                         <td><${Person} name=${row.assigned_by_name} /></td>
                         <td>${prettyWhen(row.created_at)}</td>
                         <td><${StatusPill} value=${row.display_status} /></td>
-                        <td>${actions(row)}</td>` : null}
+                        ${canDone || canMove ? html`<td>${actions(row)}</td>` : null}` : null}
                     ${kind === 'tasks' ? html`
                         <td>${row.lead_name || '—'}</td>
                         <td>${row.subject || '—'}</td>
@@ -994,7 +1016,7 @@ function Board({ kind, title, rows, onReload, onRow, onOpen, onEdit, onDelete, a
                         <td><${Person} name=${row.assigned_name} /></td>
                         <td>${prettyWhen(row.created_at)}</td>
                         <td><${StatusPill} value=${row.display_status} /></td>
-                        <td>${actions(row)}</td>` : null}
+                        ${canDone || canMove ? html`<td>${actions(row)}</td>` : null}` : null}
                 </tr>`)}
             </tbody>
         </table></div>
@@ -1005,7 +1027,7 @@ const DEAL_STAGES = [['PROPOSAL_SUBMITTED', 'Proposal submitted'], ['NEGOTIATION
 function dealLabel(value) {
     return (DEAL_STAGES.find((item) => item[0] === value) || [value, value])[1];
 }
-function LeadPage({ leadId, onBack }) {
+function LeadPage({ leadId, onBack, user }) {
     const [lead, setLead] = useState(null);
     const [section, setSection] = useState('overview');
     const [details, setDetails] = useState(false);
@@ -1111,6 +1133,12 @@ function LeadPage({ leadId, onBack }) {
         try { await call(base + row.id + '/done', { method: 'POST', body: {} }); load(); }
         catch (e) { setError(e.message); }
     }
+    const canEdit = allows(user, 'leads.update');
+    const canWhatsapp = allows(user, 'whatsapp.manage');
+    const canFollow = allows(user, 'followups.create');
+    const canVisit = allows(user, 'visits.create');
+    const canTask = allows(user, 'followups.create');
+    const canFinish = tab === 'visits' ? allows(user, 'visits.attend') : allows(user, 'followups.create');
     const activityRows = tab === 'followups' ? openCalls : tab === 'visits' ? openVisits : openTasks;
     return html`<div class="lead-page">
         <aside class="lead-side">
@@ -1128,10 +1156,10 @@ function LeadPage({ leadId, onBack }) {
                     <h2>${lead.name || 'Unnamed lead'}</h2>
                     <p>Assigned to <b>${owner}</b> (${lead.assigned_type || 'USER'})</p>
                 </div>
-                <button type="button" class="ghost" onClick=${() => setEditor('whatsapp')}>Send WhatsApp</button>
-                <button type="button" class="act act-edit" aria-label="Edit lead" title="Edit" onClick=${() => setEditor('lead')}>
+                ${canWhatsapp ? html`<button type="button" class="ghost" onClick=${() => setEditor('whatsapp')}>Send WhatsApp</button>` : null}
+                ${canEdit ? html`<button type="button" class="act act-edit" aria-label="Edit lead" title="Edit" onClick=${() => setEditor('lead')}>
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/></svg>
-                </button>
+                </button>` : null}
             </header>
             ${section === 'overview' ? html`<div>
                 <section class="lead-card">
@@ -1140,7 +1168,7 @@ function LeadPage({ leadId, onBack }) {
                     ${fact('Email', lead.email ? html`<a href=${'mailto:' + lead.email}>${lead.email}</a>` : '—')}
                     ${fact('Phone', lead.phone_number || lead.phone)}
                     ${fact('Mobile', lead.alternate_phone_number || lead.phone_secondary)}
-                    ${fact('Lead stage', html`<b class="stage-edit">${lead.lead_stage || '—'}</b>${actIcon('update', 'Update stage', () => { setStage(lead.lead_stage || 'New'); setStageOpen(true); })}`)}
+                    ${fact('Lead stage', html`<b class="stage-edit">${lead.lead_stage || '—'}</b>${canEdit ? actIcon('update', 'Update stage', () => { setStage(lead.lead_stage || 'New'); setStageOpen(true); }) : null}`)}
                     ${fact('Assigned by', lead.assigned_by_name ? html`<${Person} name=${lead.assigned_by_name} />` : '—')}
                 </section>
                 <button type="button" class="details-toggle" onClick=${() => setDetails(!details)}>${details ? 'Hide Details' : 'View Details'} <span>${details ? '▴' : '▾'}</span></button>
@@ -1179,11 +1207,11 @@ function LeadPage({ leadId, onBack }) {
                     ${fact('Description', lead.description || lead.notes)}
                 </section>` : null}
                 <section class="lead-card">
-                    <div class="card-head"><h3>Interests Projects</h3><button type="button" class="add-round" onClick=${() => { setPickedProjects(ids); setEditor('projects'); }}><i>+</i> Add Projects</button></div>
-                    ${interested.length === 0 ? html`<p class="empty-line">No interested projects added yet</p>` : html`<div class="project-pills">${interested.map((item) => html`<span key=${item.id}>${item.name}<button type="button" aria-label=${'Remove ' + item.name} onClick=${() => removeProject(item.id)}>×</button></span>`)}</div>`}
+                    <div class="card-head"><h3>Interests Projects</h3>${canEdit ? html`<button type="button" class="add-round" onClick=${() => { setPickedProjects(ids); setEditor('projects'); }}><i>+</i> Add Projects</button>` : null}</div>
+                    ${interested.length === 0 ? html`<p class="empty-line">No interested projects added yet</p>` : html`<div class="project-pills">${interested.map((item) => html`<span key=${item.id}>${item.name}${canEdit ? html`<button type="button" aria-label=${'Remove ' + item.name} onClick=${() => removeProject(item.id)}>×</button>` : null}</span>`)}</div>`}
                 </section>
                 <section class="lead-card">
-                    <div class="card-head"><h3>Deals</h3><button type="button" class="add-round" onClick=${() => setEditor('deal')}><i>+</i> Add Deal</button></div>
+                    <div class="card-head"><h3>Deals</h3>${canEdit ? html`<button type="button" class="add-round" onClick=${() => setEditor('deal')}><i>+</i> Add Deal</button>` : null}</div>
                     ${deals.length === 0 ? html`<div class="empty-deal"><svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#c5c9d1" stroke-width="1.4"><path d="M8 4h8l2 3v13H6V7l2-3z"/><path d="M9 12h6M9 16h6"/></svg></div>` : html`<div class="deal-list">${deals.map((row) => html`<article key=${row.id}><strong>${dealLabel(row.deal_stage)}</strong><span>${money(row.total_deal_value)}</span><p>${(row.project_details || []).map((item) => item.projectName).filter(Boolean).join(', ') || row.deal_description || '—'}</p></article>`)}</div>`}
                 </section>
             </div>` : null}
@@ -1191,25 +1219,25 @@ function LeadPage({ leadId, onBack }) {
                 <div class="card-head"><h3>Notes <em class="count-badge">${notes.length}</em></h3>
                     <select value=${noteSort} onChange=${(event) => setNoteSort(event.target.value)}><option value="new">Newest</option><option value="old">Oldest</option></select>
                 </div>
-                ${shownNotes.length === 0 ? html`<p class="empty-line">No notes yet</p>` : shownNotes.map((row) => html`<article class="note" key=${row.id}><header><strong>${row.note_heading}</strong>${actIcon('delete', 'Delete', () => setNoteConfirm(row))}</header><p>${row.note_content}</p><small>${row.user_name || 'Staff'} · ${prettyWhen(row.created_at)}</small></article>`)}
+                ${shownNotes.length === 0 ? html`<p class="empty-line">No notes yet</p>` : shownNotes.map((row) => html`<article class="note" key=${row.id}><header><strong>${row.note_heading}</strong>${canEdit ? actIcon('delete', 'Delete', () => setNoteConfirm(row)) : null}</header><p>${row.note_content}</p><small>${row.user_name || 'Staff'} · ${prettyWhen(row.created_at)}</small></article>`)}
                 ${noteConfirm ? confirmDelete(noteConfirm.note_heading || 'this note', error, removeNote, () => { setNoteConfirm(null); setError(''); }) : null}
-                <form class="note-box" onSubmit=${saveNote}>
+                ${canEdit ? html`<form class="note-box" onSubmit=${saveNote}>
                     <input placeholder="Note title" value=${note.noteHeading} onInput=${(event) => setNote({ ...note, noteHeading: event.target.value })} />
                     <textarea placeholder="Add a note..." value=${note.noteContent} onInput=${(event) => setNote({ ...note, noteContent: event.target.value })}></textarea>
                     <div><button class="ghost" type="button" onClick=${() => setNote({ noteHeading: '', noteContent: '' })}>Cancel</button><button class="primary" type="submit">Save</button></div>
-                </form>
+                </form>` : null}
             </section>` : null}
             ${section === 'activities' ? html`<section class="lead-card">
                 <div class="card-head">
                     <h3>Open Activities <em class="count-badge">${openCount}</em></h3>
-                    <div class="add-menu">
+                    ${canFollow || canVisit || canTask ? html`<div class="add-menu">
                         <button type="button" class="linkish" onClick=${() => setMenu(!menu)}>Add new ▾</button>
                         ${menu ? html`<div class="menu-pop">
-                            <button type="button" onClick=${() => { setEditor('followup'); setMenu(false); }}>Follow-up</button>
-                            <button type="button" onClick=${() => { setEditor('visit'); setMenu(false); }}>Visit</button>
-                            <button type="button" onClick=${() => { setEditor('task'); setMenu(false); }}>Task</button>
+                            ${canFollow ? html`<button type="button" onClick=${() => { setEditor('followup'); setMenu(false); }}>Follow-up</button>` : null}
+                            ${canVisit ? html`<button type="button" onClick=${() => { setEditor('visit'); setMenu(false); }}>Visit</button>` : null}
+                            ${canTask ? html`<button type="button" onClick=${() => { setEditor('task'); setMenu(false); }}>Task</button>` : null}
                         </div>` : null}
-                    </div>
+                    </div>` : null}
                 </div>
                 <div class="activity-tabs">
                     ${[['followups', 'Follow-ups', openCalls.length], ['visits', 'Visits', openVisits.length], ['tasks', 'Tasks', openTasks.length]].map(([key, label, count]) => html`<button type="button" key=${key} class=${tab === key ? 'on' : ''} onClick=${() => setTab(key)}>${label} <em>${count}</em></button>`)}
@@ -1219,7 +1247,7 @@ function LeadPage({ leadId, onBack }) {
                         <td>${prettyWhen(row.call_scheduled_at || row.scheduled_date_time || row.scheduled_at || row.next_at)}</td>
                         <td>${row.call_subject || row.subject || row.visit_type || row.description || '—'}</td>
                         <td><${StatusPill} value=${row.display_status} /></td>
-                        <td>${['COMPLETED', 'CANCELLED'].includes(String(row.display_status || '').toUpperCase()) ? null : html`<button class="act-done" type="button" onClick=${() => finish(tab, row)}>Mark Done</button>`}</td>
+                        <td>${!canFinish || ['COMPLETED', 'CANCELLED'].includes(String(row.display_status || '').toUpperCase()) ? null : html`<button class="act-done" type="button" onClick=${() => finish(tab, row)}>Mark Done</button>`}</td>
                     </tr>`)}
                 </tbody></table>`}
             </section>` : null}
@@ -1347,7 +1375,7 @@ function ProjectForm({ project, onDone, onClose }) {
         ` : null}
     <//>`;
 }
-function SitesBoard({ start }) {
+function SitesBoard({ start, user }) {
     const [tab, setTab] = useState(start || 'dashboard');
     const [projects, setProjects] = useState([]);
     const [plots, setPlots] = useState([]);
@@ -1430,6 +1458,12 @@ function SitesBoard({ start }) {
             })}
         </svg>`;
     }
+    const canAddProject = allows(user, 'projects.create');
+    const canEditProject = allows(user, 'projects.update');
+    const canDeleteProject = allows(user, 'projects.delete');
+    const canAddPlot = allows(user, 'plots.create');
+    const canEditPlot = allows(user, 'plots.update');
+    const canDeletePlot = allows(user, 'plots.delete');
     const followCount = rows.filter((row) => row.registration_followup && !(row.registered_on || row.status === 'registered')).length;
     const selected = projects.find((project) => String(project.id) === String(projectId));
     const phase = available[0]?.phase || available[0]?.block || rows[0]?.phase || '—';
@@ -1438,9 +1472,9 @@ function SitesBoard({ start }) {
         ${companyMark(company, logoUrl)}
         <div class="site-tools">
             <label>Project<select value=${projectId} onChange=${(event) => setProjectId(event.target.value)}><option value="">All projects</option>${projects.map((project) => html`<option key=${project.id} value=${String(project.id)}>${project.name}</option>`)}</select></label>
-            <button class="primary" type="button" onClick=${() => setProjectForm({})}>Add project</button>
-            ${selected ? actIcon('edit', 'Edit project', () => setProjectForm(selected), true) : null}
-            ${selected ? actIcon('delete', 'Delete project', () => setConfirm({ kind: 'project', row: selected }), true) : null}
+            ${canAddProject ? html`<button class="primary" type="button" onClick=${() => setProjectForm({})}>Add project</button>` : null}
+            ${selected && canEditProject ? actIcon('edit', 'Edit project', () => setProjectForm(selected), true) : null}
+            ${selected && canDeleteProject ? actIcon('delete', 'Delete project', () => setConfirm({ kind: 'project', row: selected }), true) : null}
             ${actIcon('update', 'Refresh', load, true)}
             ${tab !== 'dashboard' ? html`<input class="site-search" placeholder="Search project, plot, customer" value=${text} onInput=${(event) => setText(event.target.value)} />` : null}
         </div>
@@ -1489,14 +1523,14 @@ function SitesBoard({ start }) {
                 </tbody></table></div>
             </section>
         </div>` : null}
-        ${tab === 'available' ? html`<section class="panel-card"><h3>Available plots</h3><p>Use Book on a plot to enter the customer and booking.</p><${PlotTable} rows=${searched.filter((row) => row.status === 'available')} mode="available" onEdit=${setEdit} /></section>` : null}
-        ${tab === 'booking' ? html`<section class="panel-card"><h3>Booking register</h3><p>Edit is where the customer, advance, booking amount, and registration dates are typed.</p><${PlotTable} rows=${booked} mode="booking" onEdit=${setEdit} /></section>` : null}
-        ${tab === 'follow' ? html`<section class="panel-card"><h3>Registration follow-up</h3><p>These rows appear when an advance is saved and the actual registration date is still empty. Edit the same booking to set the date.</p><${PlotTable} rows=${follow} mode="follow" onEdit=${setEdit} /></section>` : null}
-        ${tab === 'done' ? html`<section class="panel-card"><h3>Registration completed</h3><p>A plot lands here after the actual registration date is saved on the booking.</p><${PlotTable} rows=${done} mode="done" onEdit=${setEdit} /></section>` : null}
+        ${tab === 'available' ? html`<section class="panel-card"><h3>Available plots</h3><p>Use Book on a plot to enter the customer and booking.</p><${PlotTable} rows=${searched.filter((row) => row.status === 'available')} mode="available" onEdit=${canEditPlot ? setEdit : null} /></section>` : null}
+        ${tab === 'booking' ? html`<section class="panel-card"><h3>Booking register</h3><p>Edit is where the customer, advance, booking amount, and registration dates are typed.</p><${PlotTable} rows=${booked} mode="booking" onEdit=${canEditPlot ? setEdit : null} /></section>` : null}
+        ${tab === 'follow' ? html`<section class="panel-card"><h3>Registration follow-up</h3><p>These rows appear when an advance is saved and the actual registration date is still empty. Edit the same booking to set the date.</p><${PlotTable} rows=${follow} mode="follow" onEdit=${canEditPlot ? setEdit : null} /></section>` : null}
+        ${tab === 'done' ? html`<section class="panel-card"><h3>Registration completed</h3><p>A plot lands here after the actual registration date is saved on the booking.</p><${PlotTable} rows=${done} mode="done" onEdit=${canEditPlot ? setEdit : null} /></section>` : null}
         ${tab === 'teams' ? html`<section class="panel-card"><h3>Team-wise and associate performance</h3><p>This table is counted from bookings. The associate chosen on the booking supplies the team head. There is no separate form.</p><div class="table-card"><table class="board-table"><thead><tr><th>Team head</th><th>Associate</th><th>Total plots</th><th>Booking cases</th><th>Advance</th><th>Booking amount</th><th>Follow-up</th><th>Advance overdue</th><th>Registration overdue</th><th>Completed</th></tr></thead><tbody>
             ${Object.values(teams).map((item) => html`<tr key=${item.head + item.associate}><td>${item.head}</td><td>${item.associate}</td><td>${item.plots}</td><td>${item.bookings}</td><td>${money(item.advance)}</td><td>${money(item.amount)}</td><td>${item.follow}</td><td>${item.advOver}</td><td>${item.regOver}</td><td>${item.done}</td></tr>`)}
         </tbody></table></div></section>` : null}
-        ${tab === 'inventory' ? html`<section class="panel-card"><div class="card-head"><h3>Plot inventory</h3><button class="primary" type="button" onClick=${() => setAdding(true)}>Add plot</button></div><${PlotTable} rows=${searched} mode="inventory" onEdit=${setEdit} onDelete=${(row) => setConfirm({ kind: 'plot', row })} /></section>` : null}
+        ${tab === 'inventory' ? html`<section class="panel-card"><div class="card-head"><h3>Plot inventory</h3>${canAddPlot ? html`<button class="primary" type="button" onClick=${() => setAdding(true)}>Add plot</button>` : null}</div><${PlotTable} rows=${searched} mode="inventory" onEdit=${canEditPlot ? setEdit : null} onDelete=${canDeletePlot ? (row) => setConfirm({ kind: 'plot', row }) : null} /></section>` : null}
         ${listOpen ? html`<div class="modal-back" onClick=${() => setListOpen(false)}><div class="filter-box wide" onClick=${(event) => event.stopPropagation()}><header><h2>Available plots</h2><button class="filter-x" type="button" onClick=${() => setListOpen(false)}>×</button></header><div class="filter-body"><${PlotTable} rows=${available} mode="available" /></div></div></div>` : null}
         ${edit ? html`<${BookingForm} plot=${edit} people=${people} onDone=${() => { setEdit(null); load(); }} onClose=${() => setEdit(null)} />` : null}
         ${adding ? html`<${PlotForm} projects=${projects} onDone=${() => { setAdding(false); load(); }} onClose=${() => setAdding(false)} />` : null}
@@ -1530,10 +1564,10 @@ function PlotTable({ rows, mode, onEdit, onDelete }) {
             <td>${row.plot_no || '—'}</td>
             <td>${money(row.commission_minor)}</td>
             ${mode === 'available' ? html`<td>${plotTag(row.status)}</td><td>${regCell(row)}</td>${onEdit ? html`<td class="row-actions">${actIcon('update', 'Book', () => onEdit(row), true)}</td>` : null}` : null}
-            ${mode === 'booking' ? html`<td>${row.customer_name || '—'}</td><td>${row.customer_phone || '—'}</td><td>${row.associate_name || '—'}</td><td>${row.head_name || '—'}</td><td>${plotTag(row.status)}</td><td>${prettyDate(row.booking_on)}</td><td>${money(row.advance_minor)}</td><td>${prettyDate(row.advance_deadline)}</td><td>${deadlineCell(row)}</td><td>${money(row.booking_amount_minor)}</td><td>${money(row.balance_minor)}</td><td class="row-actions">${actIcon('edit', 'Edit', () => onEdit(row))}</td>` : null}
+            ${mode === 'booking' ? html`<td>${row.customer_name || '—'}</td><td>${row.customer_phone || '—'}</td><td>${row.associate_name || '—'}</td><td>${row.head_name || '—'}</td><td>${plotTag(row.status)}</td><td>${prettyDate(row.booking_on)}</td><td>${money(row.advance_minor)}</td><td>${prettyDate(row.advance_deadline)}</td><td>${deadlineCell(row)}</td><td>${money(row.booking_amount_minor)}</td><td>${money(row.balance_minor)}</td>${onEdit ? html`<td class="row-actions">${actIcon('edit', 'Edit', () => onEdit(row))}</td>` : null}` : null}
             ${mode === 'follow' ? html`<td>${row.customer_name || '—'}</td><td>${row.customer_phone || '—'}</td><td>${row.associate_name || '—'}</td><td>${row.head_name || '—'}</td><td>${money(row.advance_minor)}</td><td>${prettyDate(row.advance_received_on)}</td><td>${prettyDate(row.registration_deadline)}</td><td>${leftCell(row)}</td><td>${plotTag(row.status)}</td><td>${regCell(row)}</td><td>${prettyDate(row.expected_registration_on)}</td><td>${row.remarks || '—'}</td>${onEdit ? html`<td class="row-actions">${actIcon('update', 'Update', () => onEdit(row))}</td>` : null}` : null}
             ${mode === 'done' ? html`<td>${row.customer_name || '—'}</td><td>${row.customer_phone || '—'}</td><td>${row.associate_name || '—'}</td><td>${row.head_name || '—'}</td><td>${plotTag(row.status)}</td><td>${regCell(row)}</td><td>${prettyDate(row.expected_registration_on)}</td><td>${prettyDate(row.registered_on)}</td><td>${row.remarks || '—'}</td>${onEdit ? html`<td class="row-actions">${actIcon('update', 'Update', () => onEdit(row))}</td>` : null}` : null}
-            ${mode === 'inventory' ? html`<td>${row.facing || '—'}</td><td>${row.area_sqft || '—'}</td><td>${plotTag(row.status)}</td><td>${row.customer_name || '—'}</td><td>${row.associate_name || '—'}</td><td>${row.head_name || '—'}</td><td>${regCell(row)}</td><td>${prettyDate(row.expected_registration_on)}</td><td class="row-actions">${actIcon('edit', 'Edit', () => onEdit(row))}${onDelete ? actIcon('delete', 'Delete', () => onDelete(row)) : null}</td>` : null}
+            ${mode === 'inventory' ? html`<td>${row.facing || '—'}</td><td>${row.area_sqft || '—'}</td><td>${plotTag(row.status)}</td><td>${row.customer_name || '—'}</td><td>${row.associate_name || '—'}</td><td>${row.head_name || '—'}</td><td>${regCell(row)}</td><td>${prettyDate(row.expected_registration_on)}</td>${onEdit || onDelete ? html`<td class="row-actions">${onEdit ? actIcon('edit', 'Edit', () => onEdit(row)) : null}${onDelete ? actIcon('delete', 'Delete', () => onDelete(row)) : null}</td>` : null}` : null}
         </tr>`)}
     </tbody></table></div>`;
 }
@@ -1746,7 +1780,7 @@ function TemplateForm({ onDone, onClose }) {
         ${field('Message', html`<textarea value=${form.body} onInput=${(event) => setForm({ ...form, body: event.target.value })}></textarea>`, true)}
     <//>`;
 }
-function Resource({ title, lede, spec }) {
+function Resource({ title, lede, spec, user }) {
     const [rows, setRows] = useState([]);
     const [error, setError] = useState('');
     const [picked, setPicked] = useState(null);
@@ -1756,6 +1790,24 @@ function Resource({ title, lede, spec }) {
     const [confirm, setConfirm] = useState(null);
     const [detail, setDetail] = useState(null);
     const actions = spec.actions || [];
+    const permit = {
+        lead: actions.includes('lead') && allows(user, 'leads.create'),
+        leadEdit: allows(user, 'leads.update'),
+        leadDelete: allows(user, 'leads.delete'),
+        followup: actions.includes('followup') && allows(user, 'followups.create'),
+        visit: actions.includes('visit') && allows(user, 'visits.create'),
+        task: actions.includes('task') && allows(user, 'followups.create'),
+        assign: actions.includes('assign') && allows(user, 'leads.transfer'),
+        user: actions.includes('user') && allows(user, 'team.invite'),
+        staffEdit: actions.includes('staff-edit') && allows(user, 'staff.update'),
+        role: actions.includes('role') && allows(user, 'roles.manage'),
+        roleDelete: actions.includes('role-delete') && allows(user, 'roles.manage'),
+        team: actions.includes('team') && allows(user, 'teams.manage'),
+        teamDelete: actions.includes('team-delete') && allows(user, 'teams.manage'),
+        template: actions.includes('template') && allows(user, 'whatsapp.manage'),
+        excel: allows(user, 'exports.download'),
+    };
+    const showBar = permit.lead || permit.followup || permit.visit || permit.task || permit.assign || permit.user || permit.role || permit.team || permit.template;
     function load() {
         call(spec.path).then((data) => setRows(Array.isArray(data) ? data : [])).catch((e) => setError(e.message));
     }
@@ -1793,18 +1845,18 @@ function Resource({ title, lede, spec }) {
             load();
         } catch (e) { setError(e.message); }
     }
-    if (detail) return html`<${LeadPage} leadId=${detail.id} onBack=${() => { setDetail(null); load(); }} />`;
+    if (detail) return html`<${LeadPage} leadId=${detail.id} user=${user} onBack=${() => { setDetail(null); load(); }} />`;
     return html`<section class="module-list">
-        ${actions.length ? html`<div class="toolbar">
-            ${actions.includes('lead') ? html`<button class="primary" onClick=${() => open('lead')}>New lead</button>` : null}
-            ${actions.includes('followup') ? html`<button class="primary" onClick=${() => open('followup')}>New follow-up</button>` : null}
-            ${actions.includes('visit') ? html`<button class="primary" onClick=${() => open('visit')}>New visit</button>` : null}
-            ${actions.includes('task') ? html`<button class="primary" onClick=${() => open('task')}>New task</button>` : null}
-            ${actions.includes('assign') ? html`<button class="ghost" onClick=${() => open('assign')}>Assign lead</button>` : null}
-            ${actions.includes('user') ? html`<button class="primary" onClick=${() => open('user')}>Add user</button>` : null}
-            ${actions.includes('role') ? html`<button class="primary" onClick=${() => open('role')}>Add role</button>` : null}
-            ${actions.includes('team') ? html`<button class="primary" onClick=${() => open('team')}>Add team</button>` : null}
-            ${actions.includes('template') ? html`<button class="primary" onClick=${() => open('template')}>Add template</button>` : null}
+        ${showBar ? html`<div class="toolbar">
+            ${permit.lead ? html`<button class="primary" onClick=${() => open('lead')}>New lead</button>` : null}
+            ${permit.followup ? html`<button class="primary" onClick=${() => open('followup')}>New follow-up</button>` : null}
+            ${permit.visit ? html`<button class="primary" onClick=${() => open('visit')}>New visit</button>` : null}
+            ${permit.task ? html`<button class="primary" onClick=${() => open('task')}>New task</button>` : null}
+            ${permit.assign ? html`<button class="ghost" onClick=${() => open('assign')}>Assign lead</button>` : null}
+            ${permit.user ? html`<button class="primary" onClick=${() => open('user')}>Add user</button>` : null}
+            ${permit.role ? html`<button class="primary" onClick=${() => open('role')}>Add role</button>` : null}
+            ${permit.team ? html`<button class="primary" onClick=${() => open('team')}>Add team</button>` : null}
+            ${permit.template ? html`<button class="primary" onClick=${() => open('template')}>Add template</button>` : null}
         </div>` : null}
         ${error ? html`<p class="error">${error}</p>` : null}
         ${composer === 'lead' ? html`<${LeadForm} lead=${editing} onDone=${saved} onClose=${() => setComposer('')} />` : null}
@@ -1819,7 +1871,7 @@ function Resource({ title, lede, spec }) {
         ${composer === 'role' ? html`<${RoleForm} onDone=${saved} onClose=${() => setComposer('')} />` : null}
         ${composer === 'role-edit' && (editing || picked) ? html`<${RoleForm} role=${editing || picked} onDone=${saved} onClose=${() => setComposer('')} />` : null}
         ${confirm ? confirmDelete(confirm.name || 'this record', error, remove, () => { setConfirm(null); setError(''); }) : null}
-        ${spec.kind ? html`<${Board} kind=${spec.kind} title=${title} rows=${rows} onReload=${load} onRow=${setPicked} onOpen=${spec.kind === 'leads' ? setDetail : null} onEdit=${spec.kind === 'leads' ? (row) => open('lead', row) : null} onDelete=${spec.kind === 'leads' ? setConfirm : null} active=${picked} />` : html`<${Grid} title=${title} note=${lede} columns=${spec.columns} rows=${rows} onRow=${setPicked} active=${picked} onEdit=${actions.includes('staff-edit') ? (row) => open('staff-edit', row) : actions.includes('role') ? (row) => open('role-edit', row) : actions.includes('team') ? (row) => open('team', row) : null} onDelete=${actions.includes('role-delete') || actions.includes('team-delete') ? setConfirm : null} />`}
+        ${spec.kind ? html`<${Board} kind=${spec.kind} title=${title} rows=${rows} user=${user} onReload=${load} onRow=${setPicked} onOpen=${spec.kind === 'leads' ? setDetail : null} onEdit=${spec.kind === 'leads' && permit.leadEdit ? (row) => open('lead', row) : null} onDelete=${spec.kind === 'leads' && permit.leadDelete ? setConfirm : null} active=${picked} />` : html`<${Grid} title=${title} note=${lede} columns=${spec.columns} rows=${rows} canExport=${permit.excel} onRow=${setPicked} active=${picked} onEdit=${permit.staffEdit ? (row) => open('staff-edit', row) : permit.role ? (row) => open('role-edit', row) : permit.team ? (row) => open('team', row) : null} onDelete=${permit.roleDelete || permit.teamDelete ? setConfirm : null} />`}
         ${picked ? html`<div class="row-actions" style=${{ marginTop: '12px' }}>
             ${spec.path.includes('leads') ? html`<button class="ghost" onClick=${() => more('timeline')}>Timeline</button>` : null}
             ${spec.path.includes('plots') ? html`<button class="ghost" onClick=${() => more('history')}>Status history</button>` : null}
@@ -1952,7 +2004,7 @@ function Home({ onOpen }) {
     const [page, setPage] = useState(0);
     useEffect(() => {
         Promise.all([
-            call('/api/v1/reports'),
+            call('/api/v1/reports').catch(() => ({})),
             call('/api/v1/leads').catch(() => []),
             call('/api/v1/visits').catch(() => []),
             call('/api/v1/followups').catch(() => []),
@@ -2466,7 +2518,7 @@ async function loadReport(id, month) {
     }
     return call('/api/v1/reports/attendance?month=' + encodeURIComponent(month));
 }
-function Reports() {
+function Reports({ user }) {
     const [tab, setTab] = useState('staff');
     const [rows, setRows] = useState([]);
     const [error, setError] = useState('');
@@ -2531,7 +2583,7 @@ function Reports() {
                 <div><h2>${view.title}</h2><p class="lede">${view.note}</p></div>
                 <div class="row-actions">
                     <span class="muted">${chosen.length ? chosen.length + ' selected' : shown.length + ' rows'}</span>
-                    <button class="ghost" type="button" onClick=${exportSheet}>Excel</button>
+                    ${allows(user, 'exports.download') ? html`<button class="ghost" type="button" onClick=${exportSheet}>Excel</button>` : null}
                 </div>
             </header>
             <div class="filters">
@@ -2720,15 +2772,17 @@ function readPlace() {
 const ATTEND_LABEL = { present: 'Present', late: 'Late', leave: 'Leave', absent: 'Absent' };
 const ATTEND_MARK = { present: 'P', late: 'Lt', leave: 'L', absent: 'A' };
 const ATTEND_TONE = { present: 'ok', late: 'warn', leave: 'info', absent: 'stop' };
-function CompanyBoard({ onSaved }) {
+function CompanyBoard({ onSaved, user }) {
     const [form, setForm] = useState(null);
     const [error, setError] = useState('');
     const [saved, setSaved] = useState('');
+    const canSave = allows(user, 'workspace.settings');
     const logoUrl = useCompanyLogo(form?.logo ? form.updatedDate || 'logo' : '');
     useEffect(() => { call('/api/v1/company').then(setForm).catch((e) => setError(e.message)); }, []);
     const set = (key) => (event) => setForm({ ...form, [key]: event.target.value });
     async function submit(event) {
         event.preventDefault();
+        if (!canSave) return;
         setError('');
         setSaved('');
         try {
@@ -2767,7 +2821,7 @@ function CompanyBoard({ onSaved }) {
         ${saved ? html`<p class="ok-line">${saved}</p>` : null}
         <div class="company-strip">
             ${logoUrl ? html`<img class="logo-preview" src=${logoUrl} alt="" />` : brandIcon()}
-            <label class="field">Logo<input type="file" accept="image/png,image/jpeg,image/webp" onChange=${uploadLogo} /></label>
+            ${canSave ? html`<label class="field">Logo<input type="file" accept="image/png,image/jpeg,image/webp" onChange=${uploadLogo} /></label>` : null}
         </div>
         <div class="form-grid">
             ${field('Company name', html`<input value=${form.companyName || ''} onInput=${set('companyName')} required />`)}
@@ -2779,14 +2833,14 @@ function CompanyBoard({ onSaved }) {
             ${field('Attendance longitude', html`<input value=${form.attendanceLng || ''} onInput=${set('attendanceLng')} placeholder="76.9558000" />`)}
             ${field('Attendance area (km)', html`<input type="number" min="0" max="100" step="0.1" value=${form.attendanceKm || ''} onInput=${set('attendanceKm')} placeholder="Leave empty to allow any place" />`)}
         </div>
-        <div class="row-actions"><button class="ghost" type="button" onClick=${async () => {
+        ${canSave ? html`<div class="row-actions"><button class="ghost" type="button" onClick=${async () => {
             setError('');
             try {
                 const place = await readPlace();
                 setForm({ ...form, attendanceLat: String(place.lat), attendanceLng: String(place.lng) });
             } catch (e) { setError(e.message); }
         }}>Use my current location</button></div>
-        <div class="row-actions"><button class="primary" type="submit" disabled=${saving}>${saving ? 'Saving…' : 'Save'}</button></div>
+        <div class="row-actions"><button class="primary" type="submit" disabled=${saving}>${saving ? 'Saving…' : 'Save'}</button></div>` : null}
     </form>`;
 }
 const CHECK_WORD = { open: 'Checked in', done: 'Checked out', none: 'Not checked in' };
@@ -3000,7 +3054,7 @@ function AttendanceBoard({ user }) {
             <label>Date<input type="date" value=${date} onChange=${(event) => event.target.value && setDate(event.target.value)} /></label>
             <label>Team<select value=${teamId} onChange=${(event) => setTeamId(event.target.value)}><option value="">All teams</option>${teams.map((team) => html`<option key=${team.id} value=${String(team.id)}>${team.name}</option>`)}</select></label>
             <button class="ghost" type="button" onClick=${() => setDate(today)}>Today</button>
-            <button class="ghost" type="button" onClick=${() => {
+            ${allows(user, 'exports.download') ? html`<button class="ghost" type="button" onClick=${() => {
                 const teamName = Object.fromEntries(teams.map((team) => [String(team.id), team.name]));
                 downloadSheet('Attendance ' + date, ['Location', 'User', 'Team', 'Check in', 'Check out', 'Status'], lines.map((line) => [
                     line.session?.location_name || line.session?.check_in_place || '',
@@ -3010,7 +3064,7 @@ function AttendanceBoard({ user }) {
                     line.session?.check_out ? clock(line.session.check_out) : (line.mark?.check_out ? clock(line.mark.check_out) : ''),
                     ATTEND_LABEL[line.session?.status || line.mark?.status] || '',
                 ]));
-            }}>Download</button>
+            }}>Download</button>` : null}
             ${canMark ? html`<button class="primary" type="button" onClick=${() => { const person = staff.find((row) => String(row.user_id) === String(user.id)) || (canCorrect ? staff[0] : null); if (person) openMark(person, null); else setError('No staff row is available to mark.'); }}>Mark attendance</button>` : null}
         </div>
         <section class="panel-card">
@@ -3124,7 +3178,7 @@ function sendStatus(row) {
     const tone = key === 'delivered' || key === 'read' || key === 'sent' ? 'ok' : key === 'queued' ? 'warn' : 'stop';
     return html`<span class=${'tag ' + tone}>${row.status_label || 'Not delivered'}</span>`;
 }
-function WhatsAppBoard() {
+function WhatsAppBoard({ user }) {
     const [tab, setTab] = useState('sent');
     const [sent, setSent] = useState([]);
     const [templates, setTemplates] = useState([]);
@@ -3147,7 +3201,7 @@ function WhatsAppBoard() {
     return html`<section class="notice-page">
         <div class="site-tabs">
             <button type="button" class=${tab === 'sent' ? 'on' : ''} onClick=${() => setTab('sent')}>Sent <em>${sent.length}</em></button>
-            <button type="button" class=${tab === 'templates' ? 'on' : ''} onClick=${() => setTab('templates')}>Templates <em>${templates.length}</em></button>
+            ${allows(user, 'whatsapp.manage') ? html`<button type="button" class=${tab === 'templates' ? 'on' : ''} onClick=${() => setTab('templates')}>Templates <em>${templates.length}</em></button>` : null}
         </div>
         ${error ? html`<p class="error">${error}</p>` : null}
         ${tab === 'sent' ? html`<section class="panel-card">
@@ -3160,7 +3214,7 @@ function WhatsAppBoard() {
                 ${rows.map((row) => html`<tr key=${row.id}><td>${prettyWhen(row.created_at)}</td><td>${row.lead_name || '—'}</td><td>${row.to_phone || '—'}</td><td>${row.subject || '—'}</td><td>${row.body || '—'}</td><td>${sendStatus(row)}</td><td>${row.user_name || '—'}</td></tr>`)}
             </tbody></table></div>`}
         </section>` : html`<section class="panel-card">
-            <div class="card-head"><div><h3>Templates</h3><p>Subjects you can send to a lead.</p></div><button class="primary" type="button" onClick=${() => setAdding(true)}>Add template</button></div>
+            <div class="card-head"><div><h3>Templates</h3><p>Subjects you can send to a lead.</p></div>${allows(user, 'whatsapp.manage') ? html`<button class="primary" type="button" onClick=${() => setAdding(true)}>Add template</button>` : null}</div>
             ${templates.length === 0 ? html`<p class="empty-line">No templates yet.</p>` : html`<div class="table-card"><table class="board-table"><thead><tr><th>Name</th><th>Language</th><th>Message</th></tr></thead><tbody>
                 ${templates.map((row) => html`<tr key=${row.id}><td>${row.name || '—'}</td><td>${row.language || '—'}</td><td>${row.body || '—'}</td></tr>`)}
             </tbody></table></div>`}
@@ -3443,6 +3497,11 @@ function App() {
     const logoUrl = fetchedLogo || (company?.logo !== false && window.__atriumLogo ? window.__atriumLogo : '');
     useEffect(() => { setPushHelp(false); }, [screen]);
     useEffect(() => {
+        if (!user) return;
+        const key = screenAccess[screen];
+        if (key && !allows(user, key)) setScreen('home');
+    }, [screen, user]);
+    useEffect(() => {
         if (!localStorage.getItem(tokenKey)) {
             setReady(true);
             return;
@@ -3465,20 +3524,21 @@ function App() {
     if (setup) return html`<${SetPassword} token=${setup} onDone=${() => { history.replaceState({}, '', apiPath('/desk/')); setSetup(''); }} />`;
     if (!ready || splash) return null;
     if (!user) return html`<${Login} onIn=${setUser} />`;
+    const visibleNav = nav.map(([label, items]) => [label, items.filter(([, id]) => !screenAccess[id] || allows(user, screenAccess[id]))]).filter(([, items]) => items.length > 0);
     const spec = lists[screen];
     const title = screen === 'settings' ? 'Settings' : (modules.find((item) => item[1] === screen)?.[0] || 'CRM');
-    const section = screen === 'settings' ? ['Settings'] : nav.find((group) => group[1].some((item) => item[1] === screen));
+    const section = screen === 'settings' ? ['Settings'] : visibleNav.find((group) => group[1].some((item) => item[1] === screen));
     const initial = String(user.name || 'A').slice(0, 1);
     return html`<div class="shell">
         <aside class="sidebar">
             <div class="brand">${logoUrl ? html`<img class="brand-logo" src=${logoUrl} alt="" />` : brandIcon()}<span><strong>${company?.companyName || user.workspace || 'Company'}</strong></span></div>
             <div class="nav-scroll">
-                ${nav.map(([label, items]) => html`<section class="nav-group" key=${label}>
+                ${visibleNav.map(([label, items]) => html`<section class="nav-group" key=${label}>
                     <div class="nav-label">${label}</div>
                     ${items.map(([text, id]) => html`<button key=${id} class=${screen === id ? 'active' : ''} onClick=${() => setScreen(id)}>${text}</button>`)}
                 </section>`)}
             </div>
-            <button class=${screen === 'settings' ? 'nav-pin active' : 'nav-pin'} type="button" onClick=${() => setScreen('settings')}>Settings</button>
+            ${allows(user, 'workspace.settings') ? html`<button class=${screen === 'settings' ? 'nav-pin active' : 'nav-pin'} type="button" onClick=${() => setScreen('settings')}>Settings</button>` : null}
             <button class="sign-out" onClick=${() => { localStorage.removeItem(tokenKey); window.__atriumLogo = ''; setUser(null); }}>Sign out</button>
         </aside>
         <div class="workspace">
@@ -3493,16 +3553,16 @@ function App() {
             </header>
             <main class="main">
                 ${screen === 'home' ? html`<${Home} onOpen=${setScreen} />` : null}
-                ${screen === 'reports' ? html`<${Reports} />` : null}
+                ${screen === 'reports' ? html`<${Reports} user=${user} />` : null}
                 ${screen === 'api' ? html`<${Console} />` : null}
                 ${screen === 'notifications' ? html`<${NoticeBoard} />` : null}
                 ${screen === 'push' ? html`<${PushBoard} />` : null}
-                ${screen === 'whatsapp' ? html`<${WhatsAppBoard} />` : null}
-                ${spec && spec.kind === 'sites' ? html`<${SitesBoard} key=${screen} start=${spec.start} />` : null}
+                ${screen === 'whatsapp' ? html`<${WhatsAppBoard} user=${user} />` : null}
+                ${spec && spec.kind === 'sites' ? html`<${SitesBoard} key=${screen} user=${user} start=${spec.start} />` : null}
                 ${spec && spec.kind === 'attendance' ? html`<${AttendanceBoard} key="attendance" user=${user} />` : null}
                 ${spec && spec.kind === 'locations' ? html`<${LocationBoard} key="locations" />` : null}
-                ${spec && spec.kind === 'company' ? html`<${CompanyBoard} onSaved=${async () => { setUser(await call('/api/v1/me')); setCompany(await call('/api/v1/company')); }} />` : null}
-                ${spec && screen !== 'notifications' && screen !== 'whatsapp' && spec.kind !== 'sites' && spec.kind !== 'attendance' && spec.kind !== 'locations' && spec.kind !== 'company' ? html`<${Resource} key=${screen} title=${title} lede=${spec.lede} spec=${spec} />` : null}
+                ${spec && spec.kind === 'company' ? html`<${CompanyBoard} user=${user} onSaved=${async () => { setUser(await call('/api/v1/me')); setCompany(await call('/api/v1/company')); }} />` : null}
+                ${spec && screen !== 'notifications' && screen !== 'whatsapp' && spec.kind !== 'sites' && spec.kind !== 'attendance' && spec.kind !== 'locations' && spec.kind !== 'company' ? html`<${Resource} key=${screen} user=${user} title=${title} lede=${spec.lede} spec=${spec} />` : null}
                 ${passwordOpen ? html`<${ChangePassword} onClose=${() => setPasswordOpen(false)} />` : null}
                 ${pushHelp ? html`<${PushGuide} onClose=${() => setPushHelp(false)} />` : null}
             </main>

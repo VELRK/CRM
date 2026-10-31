@@ -6,7 +6,9 @@
         <h1>Designations</h1>
         <p class="lede">These titles appear on staff, teams, leads, visits, attendance and incentives.</p>
     </div>
-    <button class="primary" type="button" data-modal="designation-modal" data-action="<?= site_url('app/designations') ?>" data-title="New designation" data-code="" data-label="" data-sort_order="10" data-active="1"><?= icon('plus') ?> New designation</button>
+    <?php if (in_array('workspace.settings', $can, true)) : ?>
+        <button class="primary" type="button" data-modal="designation-modal" data-action="<?= site_url('app/designations') ?>" data-title="New designation" data-code="" data-label="" data-sort_order="10" data-active="1"><?= icon('plus') ?> New designation</button>
+    <?php endif; ?>
 </header>
 <?php if ($items === []) : ?>
     <section class="panel"><div class="empty"><?= icon('inbox') ?><p>No designations yet.</p></div></section>
@@ -22,8 +24,10 @@
                     <td><?= (int) $item['sort_order'] ?></td>
                     <td><?= (int) $item['active'] === 1 ? 'Yes' : 'No' ?></td>
                     <td class="actions-cell">
-                        <button class="ghost" type="button" data-modal="designation-modal" data-action="<?= site_url('app/designations/' . $item['id']) ?>" data-title="Edit designation" data-code="<?= esc($item['code'], 'attr') ?>" data-label="<?= esc($item['label'], 'attr') ?>" data-sort_order="<?= (int) $item['sort_order'] ?>" data-active="<?= (int) $item['active'] ?>"><?= icon('square-pen') ?> Edit</button>
-                        <button class="ghost" type="button" data-modal="confirm-delete" data-action="<?= site_url('app/designations/' . $item['id'] . '/delete') ?>" data-title="Remove <?= esc($item['label'], 'attr') ?>?"><?= icon('trash-2') ?></button>
+                        <?php if (in_array('workspace.settings', $can, true)) : ?>
+                            <button class="ghost" type="button" data-modal="designation-modal" data-action="<?= site_url('app/designations/' . $item['id']) ?>" data-title="Edit designation" data-code="<?= esc($item['code'], 'attr') ?>" data-label="<?= esc($item['label'], 'attr') ?>" data-sort_order="<?= (int) $item['sort_order'] ?>" data-active="<?= (int) $item['active'] ?>"><?= icon('square-pen') ?> Edit</button>
+                            <button class="ghost" type="button" data-modal="confirm-delete" data-action="<?= site_url('app/designations/' . $item['id'] . '/delete') ?>" data-title="Remove <?= esc($item['label'], 'attr') ?>?"><?= icon('trash-2') ?></button>
+                        <?php endif; ?>
                     </td>
                 </tr>
             <?php endforeach; ?>
