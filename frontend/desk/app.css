@@ -350,7 +350,14 @@ h2 { font-size: 16px; font-weight: 600; line-height: 1.35; }
 h3 { font-size: 15px; font-weight: 600; line-height: 1.35; }
 .card h1 { font-size: 22px; }
 .login-hero h1 { font-size: 32px; line-height: 1.2; }
-.topbar h1 { font-size: 18px; }
+.topbar h1 { font-size: 18px; display: flex; align-items: center; gap: 10px; }
+.title-help { width: 28px; height: 28px; flex: none; }
+.push-guide { max-height: 88vh; display: flex; flex-direction: column; }
+.push-guide .filter-body { overflow: auto; min-height: 0; }
+.push-guide h3 { margin: 8px 0 0; font-size: 15px; }
+.push-guide p, .push-guide li { margin: 0; color: #374151; font-size: 14px; line-height: 1.5; font-weight: 400; }
+.push-guide ul { margin: 0; padding-left: 18px; display: grid; gap: 8px; }
+.push-guide strong { font-weight: 650; color: #143D2C; }
 .crumb, .lede, .muted, .user-pill em, .when, .stat small { font-size: 13px; }
 .sidebar button, .list button, .primary, .ghost, input, select, textarea { font-size: 14px; }
 .nav-label { font-size: 12px; margin: 0 12px 8px; }

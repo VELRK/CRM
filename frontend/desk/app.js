@@ -17,7 +17,7 @@ const nav = [
     ['Sites', [['Projects', 'projects']]],
     ['Sales', [['Leads', 'leads'], ['Follow-ups', 'followups'], ['Visits', 'visits'], ['Tasks', 'tasks']]],
     ['Office', [['Attendance', 'attendance'], ['Locations', 'locations'], ['Incentives', 'incentives']]],
-    ['Insight', [['Activity', 'activity'], ['Notifications', 'notifications'], ['Push alerts', 'push'], ['WhatsApp', 'whatsapp'], ['API console', 'api']]],
+    ['Insight', [['Activity', 'activity'], ['Notifications', 'notifications'], ['WhatsApp', 'whatsapp'], ['API console', 'api']]],
 ];
 const modules = nav.flatMap((group) => group[1]);
 
@@ -3222,6 +3222,57 @@ function ChipSelect({ label, options, values, onChange }) {
         </div>` : null}
     </div>`;
 }
+function PushGuide({ onClose }) {
+    const events = [
+        ['Lead assigned or transferred', 'Sends when a new lead is saved, and again when one lead or a group of leads is transferred. The person this event is about is the lead\'s current owner. Editing other details on an existing lead does not send it.'],
+        ['Follow-up scheduled', 'Sends when a follow-up is saved. The person this event is about is the employee the follow-up is assigned to.'],
+        ['Site visit scheduled', 'Sends when a site visit is saved. The person this event is about is the employee on that visit.'],
+        ['Task assigned', 'Sends when a task is saved. The person this event is about is the employee the task is assigned to.'],
+        ['Task completed', 'Sends when a task is marked done. The person this event is about is the employee the task was assigned to. Moving the task to another time does not send it.'],
+        ['Attendance marked', 'Sends when attendance is marked or corrected. The person this event is about is the employee whose attendance was marked. {place} is the location name when one was chosen.'],
+        ['Announcement', 'Sends only when you press Send on the Send tab. It is not tied to a lead, task, or visit, so there is no event person, team, or team head. Pick the people, teams, roles, or designations yourself.'],
+    ];
+    return html`<div class="modal-back" onClick=${onClose}>
+        <div class="filter-box wide push-guide" onClick=${(event) => event.stopPropagation()}>
+            <header><h2>About push alerts</h2><button class="filter-x" type="button" aria-label="Close" onClick=${onClose}>×</button></header>
+            <div class="filter-body">
+                <p>A rule watches one event. When that event happens in the desk or the phone app, the people you chose get a notice in the app. If phone delivery is connected, the same notice also goes to their phone. Nothing is sent until the rule is saved and marked Active. One event can have more than one rule.</p>
+                <h3>The three tabs</h3>
+                <ul>
+                    <li><strong>Rules.</strong> Choose the event, the words or picture, and who receives it. Turn a rule off when you want it to stop.</li>
+                    <li><strong>Send.</strong> Send an announcement now, without waiting for an event.</li>
+                    <li><strong>History.</strong> Click a row to see each person, whether the phone accepted it, and any error.</li>
+                </ul>
+                <h3>What they receive</h3>
+                <ul>
+                    <li><strong>Text.</strong> A written notice. The text box is required.</li>
+                    <li><strong>Image.</strong> A PNG, JPG, WebP, or GIF up to 8 MB, or an https link. A caption is optional. An empty caption becomes "Open the image."</li>
+                    <li><strong>Video.</strong> An MP4, WebM, or MOV up to 20 MB, or an https link. A caption is optional. An empty caption becomes "Open the video."</li>
+                </ul>
+                <p>In the title and text you can use {name} for the person, {lead} for the lead, {task} for the task, {place} for the attendance place, and {actor} for the person who did the action.</p>
+                <h3>Who receives it</h3>
+                <ul>
+                    <li><strong>The person this event is about.</strong> The owner, the assignee, or the employee whose attendance was marked.</li>
+                    <li><strong>Their team.</strong> Everyone on that person's team, including the team head.</li>
+                    <li><strong>Their team head.</strong> Only the head of that person's team.</li>
+                    <li><strong>Particular teams.</strong> Everyone on each team you pick.</li>
+                    <li><strong>Employees, roles, and designations.</strong> The people you pick.</li>
+                    <li><strong>All active people.</strong> Everyone who can sign in.</li>
+                    <li><strong>Active people only.</strong> Leave this on so inactive people are skipped.</li>
+                    <li><strong>Project.</strong> Only people on teams linked to that project.</li>
+                    <li><strong>Limit to designation.</strong> Only people with that designation.</li>
+                    <li><strong>People who report to.</strong> Only people whose team head is the person you pick.</li>
+                </ul>
+                <h3>Each event</h3>
+                <ul>
+                    ${events.map(([title, body]) => html`<li key=${title}><strong>${title}.</strong> ${body}</li>`)}
+                </ul>
+                <h3>The counts</h3>
+                <p>Notifications is how many notices were stored. Delivered to a phone is how many phones accepted one. Not delivered is how many phones did not. The person still has the notice in the app. When the line under the counts says phone delivery is not connected, history records "Push delivery is not connected." The same event about the same record is not sent again to the same person within 10 minutes. An announcement is always sent.</p>
+            </div>
+        </div>
+    </div>`;
+}
 function PushBoard() {
     const blank = () => ({ name: '', event_key: 'task.assigned', kind: 'text', media: '', title: '', message: '', active: true, recipients: { subject: true, subject_team: false, team_head: false, all_active: false, users: [], teams: [], roles: [], designations: [] }, conditions: { active_only: true, project_id: 0, designation: '', manager_user_id: 0 } });
     const [tab, setTab] = useState('rules');
@@ -3386,9 +3437,11 @@ function App() {
     const [screen, setScreen] = useState('home');
     const [setup, setSetup] = useState(() => new URLSearchParams(location.search).get('setup') || '');
     const [passwordOpen, setPasswordOpen] = useState(false);
+    const [pushHelp, setPushHelp] = useState(false);
     const [splash, setSplash] = useState(true);
     const fetchedLogo = useCompanyLogo(company?.logo ? (company.updatedDate || 'logo') : '');
     const logoUrl = fetchedLogo || (company?.logo !== false && window.__atriumLogo ? window.__atriumLogo : '');
+    useEffect(() => { setPushHelp(false); }, [screen]);
     useEffect(() => {
         if (!localStorage.getItem(tokenKey)) {
             setReady(true);
@@ -3430,7 +3483,7 @@ function App() {
         </aside>
         <div class="workspace">
             <header class="topbar">
-                <div><p class="crumb">${section ? section[0] : 'Desk'} / ${title}</p><h1>${title}</h1></div>
+                <div><p class="crumb">${section ? section[0] : 'Desk'} / ${title}</p><h1>${title}${screen === 'push' ? html`<button class="icon-btn title-help" type="button" aria-label="About push alerts" title="About push alerts" onClick=${() => setPushHelp(true)}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v6"/><path d="M12 8h.01"/></svg></button>` : null}</h1></div>
                 <div class="top-tools">
                     <input class="search" placeholder="Search..." readOnly />
                     <button class="icon-btn" aria-label="Notifications" onClick=${() => setScreen('notifications')}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 8a6 6 0 1 1 12 0c0 7 3 7 3 9H3c0-2 3-2 3-9"/><path d="M10 20a2 2 0 0 0 4 0"/></svg><span class="dot"></span></button>
@@ -3451,6 +3504,7 @@ function App() {
                 ${spec && spec.kind === 'company' ? html`<${CompanyBoard} onSaved=${async () => { setUser(await call('/api/v1/me')); setCompany(await call('/api/v1/company')); }} />` : null}
                 ${spec && screen !== 'notifications' && screen !== 'whatsapp' && spec.kind !== 'sites' && spec.kind !== 'attendance' && spec.kind !== 'locations' && spec.kind !== 'company' ? html`<${Resource} key=${screen} title=${title} lede=${spec.lede} spec=${spec} />` : null}
                 ${passwordOpen ? html`<${ChangePassword} onClose=${() => setPasswordOpen(false)} />` : null}
+                ${pushHelp ? html`<${PushGuide} onClose=${() => setPushHelp(false)} />` : null}
             </main>
         </div>
     </div>`;
