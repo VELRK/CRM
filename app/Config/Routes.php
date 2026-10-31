@@ -128,6 +128,17 @@ $routes->group('api/v1', ['filter' => 'apiauth'], static function ($routes) {
     $routes->get('reports/pdf', 'Api\DeskApi::exportPdf');
     $routes->get('reports', 'Api\DeskApi::reports');
     $routes->get('activity', 'Api\DeskApi::activity');
+    $routes->post('devices/deactivate', 'Api\DeskApi::deactivateDevice');
+    $routes->post('devices', 'Api\DeskApi::registerDevice');
+    $routes->get('notifications/summary', 'Api\DeskApi::notificationSummary');
+    $routes->get('notifications/options', 'Api\DeskApi::notificationOptions');
+    $routes->get('notifications/rules', 'Api\DeskApi::notificationRules');
+    $routes->post('notifications/rules/(:num)/delete', 'Api\DeskApi::deleteNotificationRule/$1');
+    $routes->post('notifications/rules/(:num)', 'Api\DeskApi::saveNotificationRule/$1');
+    $routes->post('notifications/rules', 'Api\DeskApi::saveNotificationRule');
+    $routes->get('notifications/history/(:num)', 'Api\DeskApi::notificationRecipients/$1');
+    $routes->get('notifications/history', 'Api\DeskApi::notificationHistory');
+    $routes->post('notifications/send', 'Api\DeskApi::sendNotification');
     $routes->get('notifications', 'Api\DeskApi::notifications');
     $routes->post('notifications/read', 'Api\DeskApi::readNotifications');
     $routes->post('notifications/(:num)/read', 'Api\DeskApi::readNotification/$1');

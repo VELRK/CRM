@@ -17,7 +17,7 @@ const nav = [
     ['Sites', [['Projects', 'projects']]],
     ['Sales', [['Leads', 'leads'], ['Follow-ups', 'followups'], ['Visits', 'visits'], ['Tasks', 'tasks']]],
     ['Office', [['Attendance', 'attendance'], ['Locations', 'locations'], ['Incentives', 'incentives']]],
-    ['Insight', [['Activity', 'activity'], ['Notifications', 'notifications'], ['WhatsApp', 'whatsapp'], ['API console', 'api']]],
+    ['Insight', [['Activity', 'activity'], ['Notifications', 'notifications'], ['Push alerts', 'push'], ['WhatsApp', 'whatsapp'], ['API console', 'api']]],
 ];
 const modules = nav.flatMap((group) => group[1]);
 
@@ -1026,6 +1026,7 @@ function LeadPage({ leadId, onBack }) {
     const [tab, setTab] = useState('followups');
     const [menu, setMenu] = useState(false);
     const [deal, setDeal] = useState({ dealStage: 'PROPOSAL_SUBMITTED', totalDealValue: '', projectId: '', amount: '', dealDescription: '' });
+    const [history, setHistory] = useState([]);
     const loadTick = useRef(0);
     const safe = (path) => call(path).catch(() => []);
     function load() {
@@ -1039,6 +1040,7 @@ function LeadPage({ leadId, onBack }) {
         safe('/api/v1/followups').then(keep(setCalls, mine));
         safe('/api/v1/visits').then(keep(setVisits, mine));
         safe('/api/v1/tasks').then(keep(setTasks, mine));
+        safe('/api/v1/leads/' + leadId + '/timeline').then(keep(setHistory, (rows) => Array.isArray(rows) ? rows : []));
     }
     function savedActivity(kind) {
         setEditor('');
@@ -1063,7 +1065,7 @@ function LeadPage({ leadId, onBack }) {
     async function saveStage(event) {
         event.preventDefault();
         setError('');
-        try { setLead(await call('/api/v1/leads/' + leadId + '/stage', { method: 'POST', body: { leadStage: stage } })); setStageOpen(false); }
+        try { setLead(await call('/api/v1/leads/' + leadId + '/stage', { method: 'POST', body: { leadStage: stage } })); setStageOpen(false); load(); }
         catch (e) { setError(e.message); }
     }
     async function saveProjects(event) {
@@ -1183,6 +1185,7 @@ function LeadPage({ leadId, onBack }) {
                     <div class="card-head"><h3>Deals</h3><button type="button" class="add-round" onClick=${() => setEditor('deal')}><i>+</i> Add Deal</button></div>
                     ${deals.length === 0 ? html`<div class="empty-deal"><svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#c5c9d1" stroke-width="1.4"><path d="M8 4h8l2 3v13H6V7l2-3z"/><path d="M9 12h6M9 16h6"/></svg></div>` : html`<div class="deal-list">${deals.map((row) => html`<article key=${row.id}><strong>${dealLabel(row.deal_stage)}</strong><span>${money(row.total_deal_value)}</span><p>${(row.project_details || []).map((item) => item.projectName).filter(Boolean).join(', ') || row.deal_description || '—'}</p></article>`)}</div>`}
                 </section>
+                <${LeadStory} rows=${history} />
             </div>` : null}
             ${section === 'notes' ? html`<section class="lead-card">
                 <div class="card-head"><h3>Notes <em class="count-badge">${notes.length}</em></h3>
@@ -1219,6 +1222,7 @@ function LeadPage({ leadId, onBack }) {
                         <td>${['COMPLETED', 'CANCELLED'].includes(String(row.display_status || '').toUpperCase()) ? null : html`<button class="act-done" type="button" onClick=${() => finish(tab, row)}>Mark Done</button>`}</td>
                     </tr>`)}
                 </tbody></table>`}
+                <${LeadStory} rows=${history} />
             </section>` : null}
         </div>
         ${stageOpen ? html`<div class="modal-back" onClick=${() => setStageOpen(false)}><form class="filter-box" onClick=${(event) => event.stopPropagation()} onSubmit=${saveStage}>
@@ -1549,6 +1553,22 @@ function regCell(row) {
     if (row.registration_followup) return html`<span class="tag warn">Pending</span>`;
     return '—';
 }
+function LeadStory({ rows }) {
+    const list = Array.isArray(rows) ? rows : [];
+    return html`<section class="lead-card">
+        <h3>Lead activity <em class="count-badge">${list.length}</em></h3>
+        ${list.length === 0 ? html`<p class="empty-line">No activity yet</p>` : html`<ol class="lead-story">
+            ${list.map((row, index) => html`<li key=${String(index) + (row.at || '') + row.title}>
+                <span class="dot"></span>
+                <div>
+                    <strong>${row.title}</strong>
+                    <small>${row.meta || prettyWhen(row.at)}</small>
+                    ${row.body ? html`<p>${row.body}</p>` : null}
+                </div>
+            </li>`)}
+        </ol>`}
+    </section>`;
+}
 function BookingForm({ plot, people, onDone, onClose }) {
     const [leads, setLeads] = useState([]);
     const [form, setForm] = useState({
@@ -1570,6 +1590,15 @@ function BookingForm({ plot, people, onDone, onClose }) {
     useEffect(() => { call('/api/v1/leads').then((rows) => setLeads(Array.isArray(rows) ? rows : [])).catch(() => {}); }, []);
     const set = (key) => (event) => setForm({ ...form, [key]: event.target.value });
     const sale = form.status === 'booked' || form.status === 'sold' || form.status === 'registered';
+    const chosen = leads.find((row) => String(row.id) === String(form.leadId));
+    const holder = chosen ? Number(chosen.owner_id || 0) : 0;
+    const lockedSale = ['booked', 'sold', 'registered'].includes(String(plot.status || ''));
+    function pickLead(event) {
+        const id = event.target.value;
+        const row = leads.find((item) => String(item.id) === id);
+        const owner = row ? Number(row.owner_id || 0) : 0;
+        setForm({ ...form, leadId: id, associateUserId: !lockedSale && owner > 0 ? String(owner) : form.associateUserId });
+    }
     async function submit(event) {
         event.preventDefault();
         setError('');
@@ -1585,8 +1614,8 @@ function BookingForm({ plot, people, onDone, onClose }) {
         ${xrow('Status', html`<select value=${form.status} onChange=${set('status')}>${Object.entries(PLOT_LABEL).map(([value, label]) => html`<option key=${value} value=${value}>${label}</option>`)}</select>`, true)}
         ${xrow('Customer', html`<input value=${form.customerName} onInput=${set('customerName')} />`, true)}
         ${xrow('Contact', html`<input value=${form.customerPhone} onInput=${set('customerPhone')} />`)}
-        ${xrow('Lead', html`<select value=${form.leadId} onChange=${set('leadId')}><option value="">Choose</option>${leads.map((row) => html`<option key=${row.id} value=${String(row.id)}>${row.lead_name || row.name || row.phone_number}</option>`)}</select>`, sale)}
-        ${xrow('Associate', html`<select value=${form.associateUserId} onChange=${set('associateUserId')}><option value="">Choose</option>${people.map((row) => html`<option key=${row.user_id || row.id} value=${String(row.user_id || row.id)}>${row.name}</option>`)}</select>`, sale)}
+        ${xrow('Lead', html`<select value=${form.leadId} onChange=${pickLead}><option value="">Choose</option>${leads.map((row) => html`<option key=${row.id} value=${String(row.id)}>${row.lead_name || row.name || row.phone_number}</option>`)}</select>`, sale)}
+        ${xrow('Associate', html`<select value=${lockedSale ? (plot.associate_user_id ? String(plot.associate_user_id) : form.associateUserId) : (holder > 0 ? String(holder) : form.associateUserId)} disabled=${lockedSale || holder > 0} onChange=${set('associateUserId')}><option value="">Choose</option>${people.map((row) => html`<option key=${row.user_id || row.id} value=${String(row.user_id || row.id)}>${row.name}</option>`)}</select>`, sale)}
         ${xrow('Booking date', html`<input type="date" value=${form.bookingOn} onInput=${set('bookingOn')} />`)}
         ${xrow('Advance', html`<input type="number" min="0" value=${form.advance} onInput=${set('advance')} />`)}
         ${xrow('Advance received', html`<input type="date" value=${form.advanceReceivedOn} onInput=${set('advanceReceivedOn')} />`)}
@@ -3124,6 +3153,132 @@ function NoticeBoard() {
         </section>
     </section>`;
 }
+function PushBoard() {
+    const blank = () => ({ name: '', event_key: 'task.assigned', title: '', message: '', active: true, recipients: { subject: true, team_head: false, all_active: false, users: [], teams: [], roles: [], designations: [] }, conditions: { active_only: true, project_id: 0, designation: '', manager_user_id: 0 } });
+    const [tab, setTab] = useState('rules');
+    const [summary, setSummary] = useState({ total: 0, sent: 0, failed: 0, push: false });
+    const [options, setOptions] = useState({ events: [], staff: [], teams: [], roles: [], designations: [], projects: [], push: false });
+    const [rules, setRules] = useState([]);
+    const [history, setHistory] = useState([]);
+    const [people, setPeople] = useState([]);
+    const [form, setForm] = useState(blank());
+    const [announce, setAnnounce] = useState({ title: '', message: '', recipients: { subject: false, team_head: false, all_active: false, users: [], teams: [], roles: [], designations: [] }, conditions: { active_only: true, project_id: 0, designation: '', manager_user_id: 0 } });
+    const [error, setError] = useState('');
+    function load() {
+        setError('');
+        call('/api/v1/notifications/summary').then((row) => setSummary(row || { total: 0, sent: 0, failed: 0 })).catch((e) => setError(e.message));
+        call('/api/v1/notifications/options').then((row) => setOptions(row || options)).catch(() => {});
+        call('/api/v1/notifications/rules').then((rows) => setRules(Array.isArray(rows) ? rows : [])).catch(() => {});
+        call('/api/v1/notifications/history').then((rows) => setHistory(Array.isArray(rows) ? rows : [])).catch(() => {});
+    }
+    useEffect(() => { load(); }, []);
+    function chosen(bag, key, event) {
+        const values = Array.from(event.target.selectedOptions).map((option) => option.value);
+        const next = key === 'designations' ? values : values.map((item) => Number(item));
+        return { ...bag, recipients: { ...bag.recipients, [key]: next } };
+    }
+    function boxes(bag, setBag, showSubject) {
+        const mark = (key) => (event) => setBag({ ...bag, recipients: { ...bag.recipients, [key]: event.target.checked } });
+        return html`<div>
+        <div class="fact-grid">
+            <div>
+                ${showSubject ? html`<label class="check"><input type="checkbox" checked=${!!bag.recipients.subject} onChange=${mark('subject')} /> The person this event is about</label>` : null}
+                <label class="check"><input type="checkbox" checked=${!!bag.recipients.team_head} onChange=${mark('team_head')} /> Their team head</label>
+                <label class="check"><input type="checkbox" checked=${!!bag.recipients.all_active} onChange=${mark('all_active')} /> All active people</label>
+                <label class="check"><input type="checkbox" checked=${bag.conditions.active_only !== false} onChange=${(event) => setBag({ ...bag, conditions: { ...bag.conditions, active_only: event.target.checked } })} /> Active people only</label>
+            </div>
+            <div>
+                <label>Employees<select multiple size="5" value=${(bag.recipients.users || []).map(String)} onChange=${(event) => setBag(chosen(bag, 'users', event))}>${options.staff.map((row) => html`<option key=${row.user_id} value=${String(row.user_id)}>${row.name}</option>`)}</select></label>
+                <label>Teams<select multiple size="4" value=${(bag.recipients.teams || []).map(String)} onChange=${(event) => setBag(chosen(bag, 'teams', event))}>${options.teams.map((row) => html`<option key=${row.id} value=${String(row.id)}>${row.name}</option>`)}</select></label>
+                <label>Roles<select multiple size="4" value=${(bag.recipients.roles || []).map(String)} onChange=${(event) => setBag(chosen(bag, 'roles', event))}>${options.roles.map((row) => html`<option key=${row.id} value=${String(row.id)}>${row.name}</option>`)}</select></label>
+                <label>Designations<select multiple size="4" value=${bag.recipients.designations || []} onChange=${(event) => setBag(chosen(bag, 'designations', event))}>${options.designations.map((row) => html`<option key=${row.code} value=${row.code}>${row.label}</option>`)}</select></label>
+            </div>
+        </div>
+        <div class="fact-grid">
+            <label>Project<select value=${String(bag.conditions.project_id || 0)} onChange=${(event) => setBag({ ...bag, conditions: { ...bag.conditions, project_id: Number(event.target.value) } })}><option value="0">Any project</option>${options.projects.map((row) => html`<option key=${row.id} value=${String(row.id)}>${row.name}</option>`)}</select></label>
+            <label>Limit to designation<select value=${bag.conditions.designation || ''} onChange=${(event) => setBag({ ...bag, conditions: { ...bag.conditions, designation: event.target.value } })}><option value="">Any designation</option>${options.designations.map((row) => html`<option key=${row.code} value=${row.code}>${row.label}</option>`)}</select></label>
+            <label>People who report to<select value=${String(bag.conditions.manager_user_id || 0)} onChange=${(event) => setBag({ ...bag, conditions: { ...bag.conditions, manager_user_id: Number(event.target.value) } })}><option value="0">Any team head</option>${options.staff.map((row) => html`<option key=${row.user_id} value=${String(row.user_id)}>${row.name}</option>`)}</select></label>
+        </div></div>`;
+    }
+    async function saveRule(event) {
+        event.preventDefault();
+        setError('');
+        try {
+            await call(form.id ? '/api/v1/notifications/rules/' + form.id : '/api/v1/notifications/rules', { method: 'POST', body: form });
+            setForm(blank());
+            load();
+        } catch (e) { setError(e.message); }
+    }
+    async function removeRule(row) {
+        setError('');
+        try { await call('/api/v1/notifications/rules/' + row.id + '/delete', { method: 'POST', body: {} }); load(); }
+        catch (e) { setError(e.message); }
+    }
+    async function send(event) {
+        event.preventDefault();
+        setError('');
+        try {
+            await call('/api/v1/notifications/send', { method: 'POST', body: announce });
+            setAnnounce({ ...announce, title: '', message: '' });
+            setTab('history');
+            load();
+        } catch (e) { setError(e.message); }
+    }
+    async function openHistory(row) {
+        setError('');
+        try { setPeople(await call('/api/v1/notifications/history/' + row.id)); setPickedHistory(row.id); }
+        catch (e) { setError(e.message); }
+    }
+    const [pickedHistory, setPickedHistory] = useState(0);
+    return html`<section>
+        ${error ? html`<p class="error">${error}</p>` : null}
+        <div class="push-counts">
+            <article class="panel-card"><h3>Notifications</h3><strong>${summary.total || 0}</strong></article>
+            <article class="panel-card"><h3>Delivered to a phone</h3><strong>${summary.sent || 0}</strong></article>
+            <article class="panel-card"><h3>Not delivered</h3><strong>${summary.failed || 0}</strong></article>
+        </div>
+        <p class="lede">${options.push ? 'Phone delivery is connected.' : 'Phone delivery is not connected yet. People still get the notice in the app. Put the Firebase service account path in fcm.credentials.'}</p>
+        <div class="push-tabs">
+            ${[['rules', 'Rules'], ['send', 'Send'], ['history', 'History']].map(([key, label]) => html`<button type="button" key=${key} class=${tab === key ? 'primary' : 'ghost'} onClick=${() => setTab(key)}>${label}</button>`)}
+        </div>
+        ${tab === 'rules' ? html`<div><form class="panel-card" onSubmit=${saveRule}>
+            <h3>${form.id ? 'Edit rule' : 'New rule'}</h3>
+            <div class="fact-grid">
+                <label>Name<input value=${form.name} onInput=${(event) => setForm({ ...form, name: event.target.value })} /></label>
+                <label>Event<select value=${form.event_key} onChange=${(event) => setForm({ ...form, event_key: event.target.value })}>${options.events.map((row) => html`<option key=${row.key} value=${row.key}>${row.module}: ${row.label}</option>`)}</select></label>
+                <label>Title<input value=${form.title} onInput=${(event) => setForm({ ...form, title: event.target.value })} /></label>
+                <label>Message<textarea value=${form.message} onInput=${(event) => setForm({ ...form, message: event.target.value })}></textarea></label>
+            </div>
+            <p class="fine">Placeholders: {name} {lead} {task} {place} {actor}</p>
+            ${boxes(form, setForm, true)}
+            <label class="check"><input type="checkbox" checked=${form.active !== false} onChange=${(event) => setForm({ ...form, active: event.target.checked })} /> Active</label>
+            <div class="form-actions"><button class="primary" type="submit">Save</button><button class="ghost" type="button" onClick=${() => setForm(blank())}>Clear</button></div>
+        </form>
+        <div class="table-wrap"><table class="board-table"><thead><tr><th>Name</th><th>Event</th><th>Title</th><th>Active</th><th></th></tr></thead><tbody>
+            ${rules.length === 0 ? html`<tr><td colSpan="5">No rules yet.</td></tr>` : rules.map((row) => html`<tr key=${row.id}>
+                <td>${row.notification_name}</td><td>${row.event_key}</td><td>${row.title}</td><td>${row.active ? 'Active' : 'Inactive'}</td>
+                <td class="row-actions">${actIcon('edit', 'Edit', () => setForm({ ...blank(), ...row, name: row.notification_name }))}${row.active ? actIcon('delete', 'Stop', () => removeRule(row)) : null}</td>
+            </tr>`)}
+        </tbody></table></div></div>` : null}
+        ${tab === 'send' ? html`<form class="panel-card" onSubmit=${send}>
+            <h3>Announcement</h3>
+            <div class="fact-grid">
+                <label>Title<input value=${announce.title} onInput=${(event) => setAnnounce({ ...announce, title: event.target.value })} /></label>
+                <label>Message<textarea value=${announce.message} onInput=${(event) => setAnnounce({ ...announce, message: event.target.value })}></textarea></label>
+            </div>
+            ${boxes(announce, setAnnounce, false)}
+            <div class="form-actions"><button class="primary" type="submit">Send</button></div>
+        </form>` : null}
+        ${tab === 'history' ? html`<div><div class="table-wrap"><table class="board-table"><thead><tr><th>When</th><th>Event</th><th>Title</th><th>By</th><th>Sent</th><th>Failed</th></tr></thead><tbody>
+            ${history.length === 0 ? html`<tr><td colSpan="6">Nothing sent yet.</td></tr>` : history.map((row) => html`<tr key=${row.id} onClick=${() => openHistory(row)}>
+                <td>${prettyWhen(row.created_at)}</td><td>${row.event_key}</td><td>${row.title}</td><td>${row.triggered_by_name || '—'}</td><td>${row.successful_count}</td><td>${row.failed_count}</td>
+            </tr>`)}
+        </tbody></table></div>
+        ${pickedHistory ? html`<section class="panel-card"><h3>Recipients</h3>${people.length === 0 ? html`<p class="empty-line">No recipients.</p>` : html`<table class="board-table"><thead><tr><th>Person</th><th>Status</th><th>Detail</th><th>When</th></tr></thead><tbody>
+            ${people.map((row) => html`<tr key=${row.user_id + (row.sent_at || '')}><td>${row.user_name || '—'}</td><td>${row.delivery_status}</td><td>${row.error_message || '—'}</td><td>${prettyWhen(row.sent_at || row.read_at)}</td></tr>`)}
+        </tbody></table>`}</section>` : null}</div>` : null}
+    </section>`;
+}
 function App() {
     const [user, setUser] = useState(null);
     const [company, setCompany] = useState(null);
@@ -3188,6 +3343,7 @@ function App() {
                 ${screen === 'reports' ? html`<${Reports} />` : null}
                 ${screen === 'api' ? html`<${Console} />` : null}
                 ${screen === 'notifications' ? html`<${NoticeBoard} />` : null}
+                ${screen === 'push' ? html`<${PushBoard} />` : null}
                 ${screen === 'whatsapp' ? html`<${WhatsAppBoard} />` : null}
                 ${spec && spec.kind === 'sites' ? html`<${SitesBoard} key=${screen} start=${spec.start} />` : null}
                 ${spec && spec.kind === 'attendance' ? html`<${AttendanceBoard} key="attendance" user=${user} />` : null}

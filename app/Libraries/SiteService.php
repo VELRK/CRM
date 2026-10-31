@@ -377,6 +377,26 @@ class SiteService
 
         $associate = (int) ($input['associateUserId'] ?? $input['associate_user_id'] ?? 0);
         $head      = (int) ($input['headUserId'] ?? $input['head_user_id'] ?? 0);
+        $leadId    = (int) ($input['leadId'] ?? $input['lead_id'] ?? 0);
+        $saleLocked = $this->db->tableExists('sales') && $this->db->table('sales')
+            ->where('tenant_id', $tenantId)
+            ->where('plot_id', $id)
+            ->where('deleted_at', null)
+            ->where('status', 'active')
+            ->countAllResults() > 0;
+
+        if ($saleLocked) {
+            $associate = (int) ($plot['associate_user_id'] ?? 0);
+            $head = (int) ($plot['head_user_id'] ?? 0);
+        } elseif ($leadId > 0 && in_array($status, self::SALE_STATUSES, true)) {
+            $lead = $this->lead($tenantId, $leadId);
+            $ownerId = (int) ($lead['owner_id'] ?? 0);
+
+            if ($ownerId > 0) {
+                $associate = $ownerId;
+                $head = 0;
+            }
+        }
 
         if ($associate > 0 && ! in_array($associate, $this->memberIds($tenantId), true)) {
             throw new RuntimeException('Choose an associate in this workspace.');
@@ -555,7 +575,13 @@ class SiteService
             'status'     => $status,
             'updated_at' => date('Y-m-d H:i:s'),
         ]);
-        $this->logLeadStatus($tenantId, $id, (string) ($existing['status'] ?? ''), $status, $byUserId);
+        $oldStage = (string) ($existing['lead_stage'] ?? '');
+
+        if ($stage !== $oldStage) {
+            $this->logLeadStatus($tenantId, $id, $oldStage !== '' ? $oldStage : null, $stage, $byUserId);
+        } elseif ((string) ($existing['status'] ?? '') !== $status) {
+            $this->logLeadStatus($tenantId, $id, (string) ($existing['status'] ?? ''), $status, $byUserId);
+        }
     }
 
     /**
@@ -961,7 +987,14 @@ class SiteService
 
         $previous = (int) ($existing['owner_id'] ?? 0);
         $this->db->table('leads')->where('id', $id)->update($data);
-        $this->logLeadStatus($tenantId, $id, (string) ($existing['status'] ?? ''), $status, (int) ($input['by_user_id'] ?? 0));
+        $oldStage = (string) ($existing['lead_stage'] ?? '');
+        $byUser = (int) ($input['by_user_id'] ?? 0);
+
+        if ($stage !== $oldStage) {
+            $this->logLeadStatus($tenantId, $id, $oldStage !== '' ? $oldStage : null, $stage, $byUser);
+        } elseif ((string) ($existing['status'] ?? '') !== $status) {
+            $this->logLeadStatus($tenantId, $id, (string) ($existing['status'] ?? ''), $status, $byUser);
+        }
 
         if ($ownerId > 0 && $ownerId !== $previous) {
             $this->db->table('lead_transfers')->insert([
@@ -1478,6 +1511,280 @@ class SiteService
     }
 
     /**
+     * Every action on one lead, oldest first: created, allocated, transferred, stage, follow-up, visit, task, note, deal, message, booking.
+     *
+     * @return list<array{at: string, action: string, title: string, who: string, meta: string, body: string}>
+     */
+    public function leadActivity(int $tenantId, int $leadId): array
+    {
+        $lead = $this->lead($tenantId, $leadId);
+
+        if ($lead === null) {
+            return [];
+        }
+
+        $events = [];
+        $creator = $this->personName((int) ($lead['inserted_by'] ?? 0));
+        $source = trim((string) ($lead['lead_source'] ?? $lead['source'] ?? ''));
+        $stage = trim((string) ($lead['lead_stage'] ?? ''));
+        $came = 'Came in' . ($source !== '' ? ' from ' . $source : '') . '.';
+
+        if ($stage !== '') {
+            $came .= ' Stage ' . $stage . '.';
+        }
+
+        $events[] = $this->activityEvent((string) ($lead['created_at'] ?? ''), 'created', 'Lead created', $creator, $came);
+
+        $transfers = $this->db->table('lead_transfers t')
+            ->select('t.*, fu.name AS from_name, tu.name AS to_name, bu.name AS by_name')
+            ->join('users fu', 'fu.id = t.from_user_id', 'left')
+            ->join('users tu', 'tu.id = t.to_user_id', 'left')
+            ->join('users bu', 'bu.id = t.by_user_id', 'left')
+            ->where('t.tenant_id', $tenantId)
+            ->where('t.lead_id', $leadId)
+            ->get()
+            ->getResultArray();
+
+        foreach ($transfers as $row) {
+            $from = trim((string) ($row['from_name'] ?? ''));
+            $to = trim((string) ($row['to_name'] ?? ''));
+            $note = trim((string) ($row['note'] ?? ''));
+            $first = (int) ($row['from_user_id'] ?? 0) < 1;
+            $body = $first
+                ? 'Allocated to ' . ($to !== '' ? $to : 'a team member') . '.'
+                : ($from !== '' ? $from : 'Unassigned') . ' → ' . $to . '. Bookings and registrations already recorded stay with ' . ($from !== '' ? $from : 'the previous person') . '. New bookings and registrations count for ' . ($to !== '' ? $to : 'the new person') . '.';
+
+            if ($note !== '' && ! in_array($note, ['First assignment', 'Owner changed on the lead'], true)) {
+                $body .= ' Reason: ' . $note . '.';
+            }
+
+            $events[] = $this->activityEvent(
+                (string) $row['created_at'],
+                $first ? 'allocated' : 'transferred',
+                $first ? 'Allocated' : 'Transferred',
+                (string) ($row['by_name'] ?? ''),
+                $body,
+            );
+        }
+
+        $ownerName = trim((string) ($lead['owner_name'] ?? ''));
+
+        if ($transfers === [] && $ownerName !== '') {
+            $events[] = $this->activityEvent(
+                (string) ($lead['assigned_date'] ?? $lead['created_at'] ?? ''),
+                'allocated',
+                'Allocated',
+                (string) ($lead['assigned_by_name'] ?? ''),
+                'Allocated to ' . $ownerName . '.',
+            );
+        }
+
+        if ($this->db->tableExists('lead_status_history')) {
+            $history = $this->db->table('lead_status_history h')
+                ->select('h.*, u.name AS user_name')
+                ->join('users u', 'u.id = h.user_id', 'left')
+                ->where('h.tenant_id', $tenantId)
+                ->where('h.lead_id', $leadId)
+                ->get()
+                ->getResultArray();
+
+            foreach ($history as $row) {
+                $old = trim((string) ($row['old_status'] ?? ''));
+                $new = trim((string) ($row['new_status'] ?? ''));
+
+                if ($old === '' && (string) ($row['created_at'] ?? '') === (string) ($lead['created_at'] ?? '')) {
+                    continue;
+                }
+
+                $body = $old === '' ? 'Stage set to ' . $new . '.' : $old . ' → ' . $new . '.';
+                $events[] = $this->activityEvent((string) $row['created_at'], 'stage', 'Stage', (string) ($row['user_name'] ?? ''), $body);
+            }
+        }
+
+        $followups = $this->db->table('followups f')
+            ->select('f.*, u.name AS user_name')
+            ->join('users u', 'u.id = f.user_id', 'left')
+            ->where('f.tenant_id', $tenantId)
+            ->where('f.lead_id', $leadId)
+            ->where('f.deleted_at', null)
+            ->get()
+            ->getResultArray();
+
+        foreach ($followups as $row) {
+            $text = trim((string) ($row['call_subject'] ?? ''));
+            $body = trim((string) ($row['body'] ?? ''));
+
+            if ($text !== '' && $body !== '' && $text !== $body) {
+                $text .= ' — ' . $body;
+            } elseif ($text === '') {
+                $text = $body;
+            }
+
+            $events[] = $this->activityEvent((string) ($row['created_at'] ?? ''), 'followup', 'Follow-up', (string) ($row['user_name'] ?? ''), $text);
+
+            if (! empty($row['done_at'])) {
+                $events[] = $this->activityEvent((string) $row['done_at'], 'followup_done', 'Follow-up done', (string) ($row['user_name'] ?? ''), $text);
+            }
+        }
+
+        $visits = $this->db->table('site_visits v')
+            ->select('v.*, u.name AS staff_name')
+            ->join('users u', 'u.id = v.staff_id', 'left')
+            ->where('v.tenant_id', $tenantId)
+            ->where('v.lead_id', $leadId)
+            ->where('v.deleted_at', null)
+            ->get()
+            ->getResultArray();
+
+        foreach ($visits as $row) {
+            $note = trim((string) ($row['note'] ?? ''));
+            $events[] = $this->activityEvent(
+                (string) ($row['created_at'] ?? $row['scheduled_at'] ?? ''),
+                'visit',
+                'Site visit',
+                (string) ($row['staff_name'] ?? ''),
+                'Scheduled' . ($note !== '' ? ' — ' . $note : '') . '.',
+            );
+
+            if (in_array((string) ($row['status'] ?? ''), ['completed', 'cancelled', 'no_show', 'attended', 'missed'], true)) {
+                $when = (string) ($row['attended_at'] ?? $row['updated_at'] ?? $row['scheduled_at'] ?? '');
+                $events[] = $this->activityEvent($when, 'visit_done', 'Site visit ' . ucfirst((string) $row['status']), (string) ($row['staff_name'] ?? ''), $note);
+            }
+        }
+
+        if ($this->db->tableExists('lead_tasks')) {
+            $tasks = $this->db->table('lead_tasks t')
+                ->select('t.*, u.name AS user_name')
+                ->join('users u', 'u.id = t.inserted_by', 'left')
+                ->where('t.tenant_id', $tenantId)
+                ->where('t.lead_id', $leadId)
+                ->where('t.deleted_at', null)
+                ->get()
+                ->getResultArray();
+
+            foreach ($tasks as $row) {
+                $text = trim((string) ($row['subject'] ?? ''));
+                $events[] = $this->activityEvent((string) ($row['created_at'] ?? ''), 'task', 'Task', (string) ($row['user_name'] ?? ''), $text);
+
+                if (! empty($row['completed_date'])) {
+                    $events[] = $this->activityEvent((string) $row['completed_date'], 'task_done', 'Task done', (string) ($row['user_name'] ?? ''), $text);
+                }
+            }
+        }
+
+        if ($this->db->tableExists('lead_notes')) {
+            $notes = $this->db->table('lead_notes n')
+                ->select('n.*, u.name AS user_name')
+                ->join('users u', 'u.id = n.user_id', 'left')
+                ->where('n.tenant_id', $tenantId)
+                ->where('n.lead_id', $leadId)
+                ->where('n.deleted_at', null)
+                ->get()
+                ->getResultArray();
+
+            foreach ($notes as $row) {
+                $heading = trim((string) ($row['note_heading'] ?? ''));
+                $content = trim((string) ($row['note_content'] ?? ''));
+                $events[] = $this->activityEvent((string) ($row['created_at'] ?? ''), 'note', 'Note', (string) ($row['user_name'] ?? ''), trim($heading . ($content !== '' ? ' — ' . $content : '')));
+            }
+        }
+
+        if ($this->db->tableExists('lead_deals')) {
+            $deals = $this->db->table('lead_deals d')
+                ->select('d.*, u.name AS user_name')
+                ->join('users u', 'u.id = d.inserted_by', 'left')
+                ->where('d.tenant_id', $tenantId)
+                ->where('d.lead_id', $leadId)
+                ->where('d.deleted_at', null)
+                ->get()
+                ->getResultArray();
+
+            foreach ($deals as $row) {
+                $label = trim((string) ($row['deal_stage'] ?? 'Deal'));
+                $detail = trim((string) ($row['deal_description'] ?? ''));
+                $events[] = $this->activityEvent((string) ($row['created_at'] ?? ''), 'deal', 'Deal', (string) ($row['user_name'] ?? ''), $label . ($detail !== '' ? ' — ' . $detail : ''));
+            }
+        }
+
+        if ($this->db->tableExists('whatsapp_messages')) {
+            $messages = $this->db->table('whatsapp_messages m')
+                ->select('m.*, u.name AS user_name')
+                ->join('users u', 'u.id = m.user_id', 'left')
+                ->where('m.tenant_id', $tenantId)
+                ->where('m.lead_id', $leadId)
+                ->get()
+                ->getResultArray();
+
+            foreach ($messages as $row) {
+                $events[] = $this->activityEvent((string) ($row['created_at'] ?? ''), 'whatsapp', 'WhatsApp', (string) ($row['user_name'] ?? ''), trim((string) ($row['body'] ?? '')));
+            }
+        }
+
+        if ($this->db->tableExists('sales')) {
+            $sales = $this->db->table('sales s')
+                ->select('s.created_at, s.plot_status, s.credited_user_id, u.name AS user_name, p.plot_no')
+                ->join('users u', 'u.id = s.credited_user_id', 'left')
+                ->join('plots p', 'p.id = s.plot_id', 'left')
+                ->where('s.tenant_id', $tenantId)
+                ->where('s.lead_id', $leadId)
+                ->where('s.deleted_at', null)
+                ->get()
+                ->getResultArray();
+
+            foreach ($sales as $row) {
+                $who = trim((string) ($row['user_name'] ?? ''));
+                $plot = trim((string) ($row['plot_no'] ?? ''));
+                $kind = ucfirst((string) ($row['plot_status'] ?? 'booked'));
+                $body = ($plot !== '' ? 'Plot ' . $plot . '. ' : '') . 'This achievement stays with ' . ($who !== '' ? $who : 'the person who booked it') . '.';
+                $events[] = $this->activityEvent((string) ($row['created_at'] ?? ''), 'achievement', $kind, $who, $body);
+            }
+        }
+
+        $createdAt = (string) ($lead['created_at'] ?? '');
+        $pinned = [];
+        $rest = [];
+
+        foreach ($events as $event) {
+            $pin = $event['action'] === 'created' || ($event['action'] === 'allocated' && $event['at'] === $createdAt);
+
+            if ($pin) {
+                $pinned[] = $event;
+            } else {
+                $rest[] = $event;
+            }
+        }
+
+        $byTime = static function (array $a, array $b): int {
+            $left = (string) ($a['at'] ?? '');
+            $right = (string) ($b['at'] ?? '');
+
+            if ($left === $right) {
+                return strcmp((string) $a['title'], (string) $b['title']);
+            }
+
+            if ($left === '') {
+                return 1;
+            }
+
+            if ($right === '') {
+                return -1;
+            }
+
+            return strcmp($left, $right);
+        };
+        usort($pinned, static function (array $a, array $b): int {
+            if ($a['action'] === $b['action']) {
+                return 0;
+            }
+
+            return $a['action'] === 'created' ? -1 : 1;
+        });
+        usort($rest, $byTime);
+
+        return array_merge($pinned, $rest);
+    }
+
+    /**
      * @return array<int, list<array{title: string, meta: string, body: string}>>
      */
     public function timelines(int $tenantId): array
@@ -1778,6 +2085,34 @@ class SiteService
         }
 
         return date('Y-m-d H:i:s', $stamp);
+    }
+
+    private function personName(int $userId): string
+    {
+        if ($userId < 1) {
+            return '';
+        }
+
+        $row = $this->db->table('users')->select('name')->where('id', $userId)->get()->getRowArray();
+
+        return trim((string) ($row['name'] ?? ''));
+    }
+
+    /**
+     * @return array{at: string, action: string, title: string, who: string, meta: string, body: string}
+     */
+    private function activityEvent(string $at, string $action, string $title, string $who, string $body): array
+    {
+        $who = trim($who);
+
+        return [
+            'at'     => $at,
+            'action' => $action,
+            'title'  => $title,
+            'who'    => $who,
+            'meta'   => trim($this->when($at !== '' ? $at : null) . ($who !== '' ? ' · ' . $who : '')),
+            'body'   => trim($body),
+        ];
     }
 
     private function when(?string $value): string

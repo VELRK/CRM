@@ -804,6 +804,12 @@ class EstateService
             return;
         }
 
+        $ownerId = (int) ($lead['owner_id'] ?? 0);
+
+        if ($ownerId > 0) {
+            $staffId = $ownerId;
+        }
+
         if ($lead === null || $staffId < 1) {
             throw new RuntimeException('A booked, sold, or registered plot needs the associate and the lead. The incentive is added at that moment.');
         }
@@ -1143,17 +1149,17 @@ class EstateService
     }
 
     /**
-     * Company for Owner, Admin, Manager and Viewer. Team for a Team Head. Own work for an advisor.
+     * Company for Owner, Admin and Viewer. A manager or team lead sees only the teams they head or belong to.
      *
      * @return array{level: string, label: string, user_ids: ?list<int>, team_ids: ?list<int>}
      */
     public function reportScope(int $tenantId, int $userId, string $roleName, bool $isOwner): array
     {
-        if ($isOwner || in_array($roleName, ['Owner', 'Admin', 'Manager', 'Viewer'], true)) {
+        if ($isOwner || in_array($roleName, ['Owner', 'Admin', 'Viewer'], true)) {
             return ['level' => 'company', 'label' => 'Company', 'user_ids' => null, 'team_ids' => null];
         }
 
-        if ($roleName === 'Team Head' && $this->db->tableExists('teams')) {
+        if (in_array($roleName, ['Manager', 'Team Head', 'Team Lead'], true) && $this->db->tableExists('teams')) {
             $teams = $this->db->table('teams')
                 ->select('id, name')
                 ->where('tenant_id', $tenantId)
@@ -1162,6 +1168,29 @@ class EstateService
                 ->get()
                 ->getResultArray();
             $teamIds = array_map(static fn (array $row): int => (int) $row['id'], $teams);
+            $profile = $this->db->table('staff_profiles')
+                ->select('team_id')
+                ->where('tenant_id', $tenantId)
+                ->where('user_id', $userId)
+                ->where('deleted_at', null)
+                ->get()
+                ->getRowArray();
+            $ownTeam = (int) ($profile['team_id'] ?? 0);
+
+            if ($ownTeam > 0 && ! in_array($ownTeam, $teamIds, true)) {
+                $named = $this->db->table('teams')
+                    ->select('id, name')
+                    ->where('tenant_id', $tenantId)
+                    ->where('id', $ownTeam)
+                    ->where('deleted_at', null)
+                    ->get()
+                    ->getRowArray();
+
+                if ($named !== null) {
+                    $teams[] = $named;
+                    $teamIds[] = $ownTeam;
+                }
+            }
 
             if ($teamIds !== []) {
                 $members = [$userId];
@@ -1173,8 +1202,8 @@ class EstateService
                     ->get()
                     ->getResultArray();
 
-                foreach ($profiles as $profile) {
-                    $members[] = (int) $profile['user_id'];
+                foreach ($profiles as $person) {
+                    $members[] = (int) $person['user_id'];
                 }
 
                 $label = count($teams) === 1 ? (string) $teams[0]['name'] : 'Your teams';
@@ -1186,6 +1215,8 @@ class EstateService
                     'team_ids' => $teamIds,
                 ];
             }
+
+            return ['level' => 'team', 'label' => 'Your team', 'user_ids' => [$userId], 'team_ids' => []];
         }
 
         return ['level' => 'own', 'label' => 'Your work', 'user_ids' => [$userId], 'team_ids' => []];

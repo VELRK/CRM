@@ -464,6 +464,18 @@ th.num, td.num { text-align: right; }
 .note header button { border: 0; background: transparent; color: #d12b3a; font-weight: 650; }
 .note p { margin: 6px 0; }
 .note small { color: #6b7280; }
+.push-counts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 12px; }
+.push-counts strong { font-size: 28px; color: #0E8A4A; }
+.push-tabs { display: flex; gap: 8px; margin: 8px 0 12px; }
+.check { display: flex; gap: 8px; align-items: center; margin: 6px 0; font-weight: 600; }
+.form-actions { display: flex; gap: 8px; margin-top: 12px; }
+.lead-story { list-style: none; margin: 8px 0 0; padding: 0; }
+.lead-story li { display: grid; grid-template-columns: 16px 1fr; gap: 10px; padding: 12px 0; border-bottom: 1px solid #e6f2ea; }
+.lead-story li:last-child { border-bottom: 0; }
+.lead-story .dot { width: 10px; height: 10px; margin-top: 5px; border-radius: 50%; background: #0E8A4A; }
+.lead-story strong { display: block; }
+.lead-story small { color: #3d6b52; font-weight: 600; }
+.lead-story p { margin: 4px 0 0; }
 .note-box { display: flex; flex-direction: column; gap: 8px; margin-top: 16px; padding-top: 12px; border-top: 1px solid #e6ebe6; }
 .note-box input, .note-box textarea { width: 100%; border: 1px solid #c9d5cc; border-radius: 10px; padding: 10px 12px; }
 .note-box div { display: flex; justify-content: flex-end; gap: 8px; }

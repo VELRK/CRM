@@ -159,6 +159,9 @@ class AccessCatalog
             'WhatsApp' => [
                 ['key' => 'whatsapp.manage', 'label' => 'Manage WhatsApp templates'],
             ],
+            'Push alerts' => [
+                ['key' => 'notifications.manage', 'label' => 'Manage push alerts'],
+            ],
             'Downloads' => [
                 ['key' => 'exports.download', 'label' => 'Download lists'],
             ],
@@ -173,6 +176,42 @@ class AccessCatalog
                 ['key' => 'billing.manage', 'label' => 'Change the plan'],
             ],
         ];
+    }
+
+    /**
+     * Each module, and each action inside it, is allowed only when the role has that permission.
+     * The owner is allowed every action.
+     *
+     * @param list<string> $permissions
+     * @return list<array{module: string, allowed: bool, actions: list<array{key: string, label: string, allowed: bool}>}>
+     */
+    public static function modules(array $permissions, bool $isOwner): array
+    {
+        $held = array_flip($permissions);
+        $modules = [];
+
+        foreach (self::groups() as $name => $items) {
+            $actions = [];
+            $allowed = false;
+
+            foreach ($items as $item) {
+                $yes = $isOwner || isset($held[$item['key']]);
+                $actions[] = [
+                    'key'     => $item['key'],
+                    'label'   => $item['label'],
+                    'allowed' => $yes,
+                ];
+                $allowed = $allowed || $yes;
+            }
+
+            $modules[] = [
+                'module'  => $name,
+                'allowed' => $allowed,
+                'actions' => $actions,
+            ];
+        }
+
+        return $modules;
     }
 
     /**

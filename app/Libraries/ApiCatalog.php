@@ -28,8 +28,19 @@ class ApiCatalog
         return [
             self::entry('Auth', 'FR-15', 'Sign in', 'POST', '/api/v1/auth/login', false, null, [
                 'email' => 'priya@example.com', 'password' => 'password1', 'device' => 'Android',
-            ], ['ok' => true, 'data' => ['token' => 'paste-this-as-bearer', 'user' => ['id' => 1, 'name' => 'Priya', 'email' => 'priya@example.com', 'role' => 'Owner', 'workspace' => 'Northwind', 'plan' => 'enterprise']]]),
-            self::entry('Auth', 'FR-15', 'Current user', 'GET', '/api/v1/me', true, null, null, ['ok' => true, 'data' => ['id' => 1, 'name' => 'Priya', 'email' => 'priya@example.com', 'role' => 'Owner', 'workspace' => 'Northwind', 'plan' => 'enterprise', 'permissions' => ['leads.view']]]),
+            ], ['ok' => true, 'data' => [
+                'token' => 'paste-this-as-bearer',
+                'user' => ['id' => 1, 'name' => 'Priya', 'email' => 'priya@example.com', 'role' => 'Owner', 'workspace' => 'Northwind', 'plan' => 'enterprise'],
+                'permissions' => ['leads.view', 'leads.transfer'],
+                'modules' => [['module' => 'Leads', 'allowed' => true, 'actions' => [['key' => 'leads.view', 'label' => 'View leads', 'allowed' => true], ['key' => 'leads.transfer', 'label' => 'Transfer a lead', 'allowed' => true]]]],
+                'scope' => ['level' => 'company', 'label' => 'Company', 'user_ids' => null, 'team_ids' => null],
+            ]]),
+            self::entry('Auth', 'FR-15', 'Current user', 'GET', '/api/v1/me', true, null, null, ['ok' => true, 'data' => [
+                'id' => 1, 'name' => 'Priya', 'email' => 'priya@example.com', 'role' => 'Owner', 'workspace' => 'Northwind', 'plan' => 'enterprise',
+                'permissions' => ['leads.view'],
+                'modules' => [['module' => 'Leads', 'allowed' => true, 'actions' => [['key' => 'leads.view', 'label' => 'View leads', 'allowed' => true]]]],
+                'scope' => ['level' => 'team', 'label' => 'North wing', 'user_ids' => [3, 7], 'team_ids' => [1]],
+            ]]),
             self::entry('Auth', 'FR-15', 'Sign out', 'POST', '/api/v1/auth/logout', true, null, new \stdClass(), ['ok' => true, 'data' => ['revoked' => true]]),
             self::entry('Auth', 'FR-15', 'Set password from link', 'POST', '/api/v1/auth/password', false, null, [
                 'token' => 'token-from-setup-link', 'password' => 'new-password',
@@ -98,7 +109,11 @@ class ApiCatalog
             ], ['ok' => true, 'data' => [$lead], 'meta' => ['total' => 1]]),
             self::entry('Leads', 'FR-4.4', 'Duplicate phone check', 'POST', '/api/v1/leads/check', true, 'leads.view', ['phoneNumber' => '9840012345'], ['ok' => true, 'data' => ['duplicate' => true, 'lead' => $lead, 'timeline' => []]]),
             self::entry('Leads', 'FR-4.2', 'Create lead', 'POST', '/api/v1/leads', true, 'leads.create', $leadInput, ['ok' => true, 'data' => ['id' => 1]]),
-            self::entry('Leads', 'FR-4.6', 'Lead timeline', 'GET', '/api/v1/leads/1/timeline', true, 'leads.view', null, ['ok' => true, 'data' => [['title' => 'Follow-up', 'meta' => '24 Oct', 'body' => 'Asked about the east plot']]]),
+            self::entry('Leads', 'FR-4.6', 'Lead activity', 'GET', '/api/v1/leads/1/timeline', true, 'leads.view', null, ['ok' => true, 'data' => [
+                ['at' => '2026-10-01 09:00:00', 'action' => 'created', 'title' => 'Lead created', 'who' => 'Priya', 'meta' => '01 Oct 2026, 09:00 · Priya', 'body' => 'Came in from Website. Stage New.'],
+                ['at' => '2026-10-01 09:00:00', 'action' => 'allocated', 'title' => 'Allocated', 'who' => 'Priya', 'meta' => '01 Oct 2026, 09:00 · Priya', 'body' => 'Allocated to Meena.'],
+                ['at' => '2026-10-24 11:00:00', 'action' => 'transferred', 'title' => 'Transferred', 'who' => 'Priya', 'meta' => '24 Oct 2026, 11:00 · Priya', 'body' => 'Meena → Arun. Bookings and registrations already recorded stay with Meena. New bookings and registrations count for Arun.'],
+            ]]),
             self::entry('Leads', 'FR-7.1', 'Transfer one lead', 'POST', '/api/v1/leads/1/transfer', true, 'leads.transfer', ['assignedTo' => 2, 'reason' => 'Customer asked for Priya'], ['ok' => true, 'data' => ['id' => 1]]),
             self::entry('Leads', 'FR-7.3', 'Bulk transfer', 'POST', '/api/v1/leads/transfer', true, 'leads.transfer', ['lead_ids' => [1], 'assignedTo' => 2, 'reason' => 'Staff relieved'], ['ok' => true, 'data' => ['moved' => 1]]),
             self::entry('Leads', 'FR-4.2', 'Export leads', 'GET', '/api/v1/leads/export', true, 'exports.download', null, 'CSV file'),
@@ -141,7 +156,30 @@ class ApiCatalog
             self::entry('Reports', 'FR-13', 'Excel export', 'GET', '/api/v1/reports/excel', true, 'exports.download', null, ['file' => 'atrium-reports.xls']),
             self::entry('Reports', 'FR-13', 'PDF export', 'GET', '/api/v1/reports/pdf', true, 'exports.download', null, ['file' => 'atrium-reports.pdf']),
             self::entry('Activity', 'FR-10', 'Activity log', 'GET', '/api/v1/activity', true, 'team.view', null, ['ok' => true, 'data' => [['id' => 9, 'user_name' => 'Priya', 'action' => 'plot.status', 'subject_type' => 'plot', 'subject_id' => 1, 'detail' => 'booked', 'created_at' => '2026-10-24 16:00:00']]]),
+            self::entry('Notifications', 'FR-15', 'Register a phone', 'POST', '/api/v1/devices', true, null, [
+                'token' => 'fcm-device-token', 'platform' => 'android', 'name' => 'Pixel',
+            ], ['ok' => true, 'data' => ['saved' => true]]),
+            self::entry('Notifications', 'FR-15', 'Forget a phone', 'POST', '/api/v1/devices/deactivate', true, null, [
+                'token' => 'fcm-device-token',
+            ], ['ok' => true, 'data' => ['saved' => true]]),
             self::entry('Notifications', 'FR-15', 'Notifications', 'GET', '/api/v1/notifications', true, null, null, ['ok' => true, 'data' => [['id' => 1, 'title' => 'Follow-up due', 'body' => 'Call Ravi', 'read_at' => null]]]),
+            self::entry('Notifications', 'FR-15', 'Push rules', 'GET', '/api/v1/notifications/rules', true, 'notifications.manage', null, ['ok' => true, 'data' => [[
+                'id' => 1, 'notification_name' => 'New task', 'module' => 'Tasks', 'event_key' => 'task.assigned', 'title' => 'New task', 'message' => '{name}, you have a task: {task}', 'active' => true,
+                'recipients' => ['subject' => true, 'team_head' => true, 'all_active' => false, 'users' => [], 'teams' => [], 'roles' => [], 'designations' => []],
+                'conditions' => ['active_only' => true, 'project_id' => 0, 'designation' => '', 'manager_user_id' => 0],
+            ]]]),
+            self::entry('Notifications', 'FR-15', 'Save a push rule', 'POST', '/api/v1/notifications/rules', true, 'notifications.manage', [
+                'name' => 'New task', 'event_key' => 'task.assigned', 'title' => 'New task', 'message' => '{name}, you have a task: {task}', 'active' => true,
+                'recipients' => ['subject' => true, 'team_head' => false, 'users' => [], 'teams' => [], 'roles' => [], 'designations' => []],
+                'conditions' => ['active_only' => true],
+            ], ['ok' => true, 'data' => ['id' => 1]]),
+            self::entry('Notifications', 'FR-15', 'Send an announcement', 'POST', '/api/v1/notifications/send', true, 'notifications.manage', [
+                'title' => 'Site meeting', 'message' => 'Meet at the east gate at 10.',
+                'recipients' => ['teams' => [1]], 'conditions' => ['active_only' => true],
+            ], ['ok' => true, 'data' => ['recipients' => 4]]),
+            self::entry('Notifications', 'FR-15', 'Push history', 'GET', '/api/v1/notifications/history', true, 'notifications.manage', null, ['ok' => true, 'data' => [[
+                'id' => 1, 'event_key' => 'task.assigned', 'title' => 'New task', 'message' => 'You have a task', 'total_recipients' => 1, 'successful_count' => 0, 'failed_count' => 1, 'created_at' => '2026-10-31 11:00:00',
+            ]]]),
             self::entry('Notifications', 'FR-15', 'Mark all read', 'POST', '/api/v1/notifications/read', true, null, new \stdClass(), ['ok' => true, 'data' => ['read' => true]]),
 
             self::entry('WhatsApp', 'FR-14', 'Sent messages', 'GET', '/api/v1/whatsapp/messages', true, 'leads.view', null, ['ok' => true, 'data' => [['id' => 1, 'lead_name' => 'Ravi Kumar', 'to_phone' => '9840012345', 'subject' => 'Welcome', 'body' => 'Hello Ravi Kumar', 'status' => 'failed', 'status_label' => 'Not delivered', 'user_name' => 'Priya', 'created_at' => '2026-10-29 18:00:00']]]),

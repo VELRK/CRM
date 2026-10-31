@@ -10,6 +10,7 @@ use App\Libraries\AttendanceLocationService;
 use App\Libraries\DeskService;
 use App\Libraries\ReportFile;
 use App\Libraries\EstateService;
+use App\Libraries\PushService;
 use App\Libraries\RoleService;
 use App\Libraries\SiteService;
 use App\Libraries\WorkspaceService;
@@ -78,9 +79,13 @@ class DeskApi extends BaseController
         ]);
         $this->desk->audit((int) $member['tenant_id'], (int) $user['id'], (string) $member['plan_code'], 'login', 'user', (int) $user['id'], 'API sign-in');
 
+        $isOwner = (int) ($member['is_owner'] ?? 0) === 1;
+        $permissions = $this->workspaces->permissions((int) $member['role_id']);
+        $scope = $this->estate->reportScope((int) $member['tenant_id'], (int) $user['id'], (string) $member['role_name'], $isOwner);
+
         return $this->ok([
-            'token' => $raw,
-            'user'  => [
+            'token'       => $raw,
+            'user'        => [
                 'id'        => (int) $user['id'],
                 'name'      => (string) $member['user_name'],
                 'email'     => $email,
@@ -88,6 +93,9 @@ class DeskApi extends BaseController
                 'workspace' => (string) $member['workspace_name'],
                 'plan'      => (string) $member['plan_code'],
             ],
+            'permissions' => $isOwner ? AccessCatalog::keys() : array_values($permissions),
+            'modules'     => AccessCatalog::modules($permissions, $isOwner),
+            'scope'       => $scope,
         ]);
     }
 
@@ -95,6 +103,11 @@ class DeskApi extends BaseController
     {
         $actor = $this->actor();
         db_connect()->table('api_tokens')->where('id', (int) $actor['token_id'])->update(['revoked_at' => date('Y-m-d H:i:s')]);
+        $token = trim((string) ($this->input()['token'] ?? $this->input()['device_token'] ?? ''));
+
+        if ($token !== '') {
+            $this->alerts()->deactivateDevice((int) $actor['tenant_id'], (int) $actor['user_id'], $token);
+        }
 
         return $this->ok(['revoked' => true]);
     }
@@ -330,6 +343,7 @@ class DeskApi extends BaseController
     public function me(): ResponseInterface
     {
         $actor = $this->actor();
+        $isOwner = (bool) $actor['is_owner'];
 
         return $this->ok([
             'id'          => $actor['user_id'],
@@ -338,7 +352,9 @@ class DeskApi extends BaseController
             'role'        => $actor['role_name'],
             'workspace'   => $actor['workspace'],
             'plan'        => $actor['plan_code'],
-            'permissions' => $actor['permissions'],
+            'permissions' => $isOwner ? AccessCatalog::keys() : array_values($actor['permissions']),
+            'modules'     => AccessCatalog::modules($actor['permissions'], $isOwner),
+            'scope'       => $this->viewScope(),
         ]);
     }
 
@@ -786,7 +802,11 @@ class DeskApi extends BaseController
 
         $lead = $this->sites->lead($this->tenant(), $id);
 
-        return $lead === null ? $this->fail('That lead is not in this workspace.', 404) : $this->ok($lead);
+        if ($lead === null || $this->outsideTeam($lead, ['owner_id'])) {
+            return $this->fail('That lead is not in this workspace.', 404);
+        }
+
+        return $this->ok($lead);
     }
 
     public function checkLead(): ResponseInterface
@@ -803,10 +823,16 @@ class DeskApi extends BaseController
             return $this->ok(['duplicate' => false, 'lead' => null]);
         }
 
+        $lead = $this->sites->lead($this->tenant(), (int) $row['id']);
+
+        if ($lead === null || $this->outsideTeam($lead, ['owner_id'])) {
+            return $this->ok(['duplicate' => false, 'lead' => null]);
+        }
+
         return $this->ok([
             'duplicate' => true,
-            'lead'      => $this->sites->lead($this->tenant(), (int) $row['id']),
-            'timeline'  => $this->sites->timelines($this->tenant())[(int) $row['id']] ?? [],
+            'lead'      => $lead,
+            'timeline'  => $this->sites->leadActivity($this->tenant(), (int) $row['id']),
         ]);
     }
 
@@ -814,6 +840,10 @@ class DeskApi extends BaseController
     {
         if ($denied = $this->guard($id === null ? 'leads.create' : 'leads.update')) {
             return $denied;
+        }
+
+        if ($id !== null && ($blocked = $this->leadGate($id))) {
+            return $blocked;
         }
 
         return $this->run(function () use ($id) {
@@ -832,6 +862,10 @@ class DeskApi extends BaseController
 
             $this->desk->audit($this->tenant(), $this->user(), $this->plan(), $id === null ? 'lead.create' : 'lead.update', 'lead', $saved, (string) ($input['status'] ?? ''));
 
+            if ($id === null) {
+                $this->alertLead($saved);
+            }
+
             return $this->ok(['id' => $saved]);
         });
     }
@@ -840,6 +874,10 @@ class DeskApi extends BaseController
     {
         if ($denied = $this->guard('leads.delete')) {
             return $denied;
+        }
+
+        if ($blocked = $this->leadGate($id)) {
+            return $blocked;
         }
 
         return $this->run(function () use ($id) {
@@ -853,6 +891,10 @@ class DeskApi extends BaseController
     {
         if ($denied = $this->guard('leads.update')) {
             return $denied;
+        }
+
+        if ($blocked = $this->leadGate($id)) {
+            return $blocked;
         }
 
         return $this->run(function () use ($id) {
@@ -869,6 +911,10 @@ class DeskApi extends BaseController
             return $denied;
         }
 
+        if ($blocked = $this->leadGate($id)) {
+            return $blocked;
+        }
+
         return $this->run(function () use ($id) {
             $input = $this->input();
             $this->sites->setInterestedProjects($this->tenant(), $id, $input['intrestedProjects'] ?? $input['interestedProjects'] ?? $input['interested_projects'] ?? []);
@@ -883,6 +929,10 @@ class DeskApi extends BaseController
             return $denied;
         }
 
+        if ($blocked = $this->leadGate($id)) {
+            return $blocked;
+        }
+
         return $this->run(fn () => $this->ok($this->sites->leadNotes($this->tenant(), $id)));
     }
 
@@ -890,6 +940,10 @@ class DeskApi extends BaseController
     {
         if ($denied = $this->guard('leads.update')) {
             return $denied;
+        }
+
+        if ($blocked = $this->leadGate($id)) {
+            return $blocked;
         }
 
         return $this->run(function () use ($id) {
@@ -905,6 +959,10 @@ class DeskApi extends BaseController
             return $denied;
         }
 
+        if ($blocked = $this->leadGate($id)) {
+            return $blocked;
+        }
+
         return $this->run(function () use ($id, $noteId) {
             $this->sites->deleteNote($this->tenant(), $id, $noteId);
 
@@ -918,6 +976,10 @@ class DeskApi extends BaseController
             return $denied;
         }
 
+        if ($blocked = $this->leadGate($id)) {
+            return $blocked;
+        }
+
         return $this->run(fn () => $this->ok($this->sites->leadDeals($this->tenant(), $id)));
     }
 
@@ -925,6 +987,10 @@ class DeskApi extends BaseController
     {
         if ($denied = $this->guard('leads.update')) {
             return $denied;
+        }
+
+        if ($blocked = $this->leadGate($id)) {
+            return $blocked;
         }
 
         return $this->run(function () use ($id) {
@@ -940,11 +1006,13 @@ class DeskApi extends BaseController
             return $denied;
         }
 
-        if ($this->sites->lead($this->tenant(), $id) === null) {
+        $lead = $this->sites->lead($this->tenant(), $id);
+
+        if ($lead === null || $this->outsideTeam($lead, ['owner_id'])) {
             return $this->fail('That lead is not in this workspace.', 404);
         }
 
-        return $this->ok($this->sites->timelines($this->tenant())[$id] ?? []);
+        return $this->ok($this->sites->leadActivity($this->tenant(), $id));
     }
 
     public function transfer(int $id): ResponseInterface
@@ -953,10 +1021,15 @@ class DeskApi extends BaseController
             return $denied;
         }
 
+        if ($blocked = $this->leadGate($id)) {
+            return $blocked;
+        }
+
         return $this->run(function () use ($id) {
             $input = $this->input();
             $this->sites->transfer($this->tenant(), $id, (int) ($input['assignedTo'] ?? $input['assigned_to'] ?? $input['to_user_id'] ?? 0), $this->user(), trim((string) ($input['reason'] ?? $input['note'] ?? '')));
             $this->desk->audit($this->tenant(), $this->user(), $this->plan(), 'lead.transfer', 'lead', $id, (string) ($input['reason'] ?? ''));
+            $this->alertLead($id);
 
             return $this->ok(['id' => $id]);
         });
@@ -971,7 +1044,20 @@ class DeskApi extends BaseController
         return $this->run(function () {
             $input = $this->input();
             $ids = array_map('intval', is_array($input['lead_ids'] ?? null) ? $input['lead_ids'] : []);
-            $moved = $this->estate->bulkTransfer($this->tenant(), $ids, (int) ($input['assignedTo'] ?? $input['to_user_id'] ?? 0), $this->user(), trim((string) ($input['reason'] ?? '')), $this->sites);
+
+            foreach ($ids as $leadId) {
+                if ($blocked = $this->leadGate((int) $leadId)) {
+                    return $blocked;
+                }
+            }
+
+            $reason = trim((string) ($input['reason'] ?? ''));
+            $moved = $this->estate->bulkTransfer($this->tenant(), $ids, (int) ($input['assignedTo'] ?? $input['to_user_id'] ?? 0), $this->user(), $reason, $this->sites);
+
+            foreach ($ids as $leadId) {
+                $this->desk->audit($this->tenant(), $this->user(), $this->plan(), 'lead.transfer', 'lead', (int) $leadId, $reason);
+                $this->alertLead((int) $leadId);
+            }
 
             return $this->ok(['moved' => $moved]);
         });
@@ -1038,8 +1124,22 @@ class DeskApi extends BaseController
 
         return $this->run(function () {
             $input = $this->input();
-            $id = $this->sites->saveFollowup($this->tenant(), $this->user(), (int) ($input['leadId'] ?? $input['lead_id'] ?? 0), $input);
-            $this->desk->audit($this->tenant(), $this->user(), $this->plan(), 'followup.create', 'lead', (int) ($input['lead_id'] ?? 0), (string) ($input['body'] ?? ''));
+            $leadId = (int) ($input['leadId'] ?? $input['lead_id'] ?? 0);
+
+            if ($blocked = $this->leadGate($leadId)) {
+                return $blocked;
+            }
+
+            $id = $this->sites->saveFollowup($this->tenant(), $this->user(), $leadId, $input);
+            $this->desk->audit($this->tenant(), $this->user(), $this->plan(), 'followup.create', 'lead', $leadId, (string) ($input['body'] ?? ''));
+            $assigned = (int) ($input['assignedTo'] ?? $input['assigned_to'] ?? $this->user());
+            $this->alert('followup.created', [
+                'subject_user_id' => $assigned,
+                'subject_type'    => 'followup',
+                'subject_id'      => $id,
+                'lead'            => (string) ($this->sites->lead($this->tenant(), $leadId)['name'] ?? ''),
+                'name'            => $this->personName($assigned),
+            ]);
 
             return $this->ok(['id' => $id]);
         });
@@ -1049,6 +1149,10 @@ class DeskApi extends BaseController
     {
         if ($denied = $this->guard('followups.create')) {
             return $denied;
+        }
+
+        if ($blocked = $this->teamRecord('followups', $id, ['assigned_to', 'user_id', 'assigned_user_id'])) {
+            return $blocked;
         }
 
         return $this->run(function () use ($id) {
@@ -1062,6 +1166,10 @@ class DeskApi extends BaseController
     {
         if ($denied = $this->guard('followups.create')) {
             return $denied;
+        }
+
+        if ($blocked = $this->teamRecord('followups', $id, ['assigned_to', 'user_id', 'assigned_user_id'])) {
+            return $blocked;
         }
 
         return $this->run(function () use ($id) {
@@ -1098,8 +1206,22 @@ class DeskApi extends BaseController
 
         return $this->run(function () {
             $input = $this->input();
+            $leadId = (int) ($input['leadId'] ?? $input['lead_id'] ?? 0);
+
+            if ($blocked = $this->leadGate($leadId)) {
+                return $blocked;
+            }
+
             $input['created_by'] = $this->user();
-            $id = $this->sites->saveVisit($this->tenant(), (int) ($input['leadId'] ?? $input['lead_id'] ?? 0), $input);
+            $id = $this->sites->saveVisit($this->tenant(), $leadId, $input);
+            $staffId = (int) ($input['assignedTo'] ?? $input['assigned_to'] ?? $input['staff_id'] ?? 0);
+            $this->alert('visit.scheduled', [
+                'subject_user_id' => $staffId,
+                'subject_type'    => 'visit',
+                'subject_id'      => $id,
+                'lead'            => (string) ($this->sites->lead($this->tenant(), $leadId)['name'] ?? ''),
+                'name'            => $this->personName($staffId),
+            ]);
 
             return $this->ok(['id' => $id]);
         });
@@ -1109,6 +1231,10 @@ class DeskApi extends BaseController
     {
         if ($denied = $this->guard('visits.attend')) {
             return $denied;
+        }
+
+        if ($blocked = $this->teamRecord('site_visits', $id, ['staff_id'])) {
+            return $blocked;
         }
 
         return $this->run(function () use ($id) {
@@ -1124,6 +1250,10 @@ class DeskApi extends BaseController
             return $denied;
         }
 
+        if ($blocked = $this->teamRecord('site_visits', $id, ['staff_id'])) {
+            return $blocked;
+        }
+
         return $this->run(function () use ($id) {
             $this->sites->completeVisit($this->tenant(), $id);
 
@@ -1135,6 +1265,10 @@ class DeskApi extends BaseController
     {
         if ($denied = $this->guard('visits.create')) {
             return $denied;
+        }
+
+        if ($blocked = $this->teamRecord('site_visits', $id, ['staff_id'])) {
+            return $blocked;
         }
 
         return $this->run(function () use ($id) {
@@ -1170,7 +1304,22 @@ class DeskApi extends BaseController
         }
 
         return $this->run(function () {
-            $id = $this->sites->saveTask($this->tenant(), $this->user(), $this->input());
+            $input = $this->input();
+            $leadId = (int) ($input['leadId'] ?? $input['lead_id'] ?? 0);
+
+            if ($blocked = $this->leadGate($leadId)) {
+                return $blocked;
+            }
+
+            $id = $this->sites->saveTask($this->tenant(), $this->user(), $input);
+            $assigned = (int) ($input['assignedTo'] ?? $input['assigned_to'] ?? $this->user());
+            $this->alert('task.assigned', [
+                'subject_user_id' => $assigned,
+                'subject_type'    => 'task',
+                'subject_id'      => $id,
+                'task'            => (string) ($input['subject'] ?? ''),
+                'name'            => $this->personName($assigned),
+            ]);
 
             return $this->ok(['id' => $id]);
         });
@@ -1182,8 +1331,21 @@ class DeskApi extends BaseController
             return $denied;
         }
 
+        if ($blocked = $this->teamRecord('lead_tasks', $id, ['assigned_to'])) {
+            return $blocked;
+        }
+
         return $this->run(function () use ($id) {
+            $task = db_connect()->table('lead_tasks')->select('assigned_to, subject')->where('tenant_id', $this->tenant())->where('id', $id)->get()->getRowArray();
             $this->sites->completeTask($this->tenant(), $id);
+            $assigned = (int) ($task['assigned_to'] ?? 0);
+            $this->alert('task.completed', [
+                'subject_user_id' => $assigned,
+                'subject_type'    => 'task',
+                'subject_id'      => $id,
+                'task'            => (string) ($task['subject'] ?? ''),
+                'name'            => $this->personName($assigned),
+            ]);
 
             return $this->ok(['id' => $id, 'status' => 'COMPLETED']);
         });
@@ -1193,6 +1355,10 @@ class DeskApi extends BaseController
     {
         if ($denied = $this->guard('followups.create')) {
             return $denied;
+        }
+
+        if ($blocked = $this->teamRecord('lead_tasks', $id, ['assigned_to'])) {
+            return $blocked;
         }
 
         return $this->run(function () use ($id) {
@@ -1292,6 +1458,13 @@ class DeskApi extends BaseController
             $userId = $correcting ? $target : $this->user();
             $this->estate->markAttendance($this->tenant(), $userId, $input, $correcting, $this->user());
             $this->desk->audit($this->tenant(), $this->user(), $this->plan(), $correcting ? 'attendance.correct' : 'attendance.mark', 'user', $userId, (string) ($input['status'] ?? ''));
+            $this->alert('attendance.marked', [
+                'subject_user_id' => $userId,
+                'subject_type'    => 'attendance',
+                'subject_id'      => (int) date('Ymd'),
+                'place'           => (string) ($input['location_name'] ?? $input['place'] ?? ''),
+                'name'            => $this->personName($userId),
+            ]);
 
             return $this->ok(['saved' => true]);
         });
@@ -1436,8 +1609,113 @@ class DeskApi extends BaseController
     public function readNotification(int $id): ResponseInterface
     {
         $this->desk->markNotice($this->tenant(), $this->user(), $id);
+        $this->alerts()->markRead($this->tenant(), $this->user(), $id);
 
         return $this->ok(['id' => $id]);
+    }
+
+    public function registerDevice(): ResponseInterface
+    {
+        return $this->run(function () {
+            $this->alerts()->registerDevice($this->tenant(), $this->user(), $this->input());
+
+            return $this->ok(['saved' => true]);
+        });
+    }
+
+    public function deactivateDevice(): ResponseInterface
+    {
+        $token = trim((string) ($this->input()['token'] ?? $this->input()['device_token'] ?? ''));
+        $this->alerts()->deactivateDevice($this->tenant(), $this->user(), $token);
+
+        return $this->ok(['saved' => true]);
+    }
+
+    public function notificationSummary(): ResponseInterface
+    {
+        if ($denied = $this->guard('notifications.manage')) {
+            return $denied;
+        }
+
+        return $this->ok($this->alerts()->summary($this->tenant()));
+    }
+
+    public function notificationOptions(): ResponseInterface
+    {
+        if ($denied = $this->guard('notifications.manage')) {
+            return $denied;
+        }
+
+        return $this->ok($this->alerts()->options($this->tenant()));
+    }
+
+    public function notificationRules(): ResponseInterface
+    {
+        if ($denied = $this->guard('notifications.manage')) {
+            return $denied;
+        }
+
+        return $this->ok($this->alerts()->rules($this->tenant()));
+    }
+
+    public function saveNotificationRule(?int $id = null): ResponseInterface
+    {
+        if ($denied = $this->guard('notifications.manage')) {
+            return $denied;
+        }
+
+        return $this->run(fn () => $this->ok(['id' => $this->alerts()->saveRule($this->tenant(), $this->user(), $id, $this->input())]));
+    }
+
+    public function deleteNotificationRule(int $id): ResponseInterface
+    {
+        if ($denied = $this->guard('notifications.manage')) {
+            return $denied;
+        }
+
+        return $this->run(function () use ($id) {
+            $this->alerts()->deleteRule($this->tenant(), $id);
+
+            return $this->ok(['id' => $id, 'deleted' => true]);
+        });
+    }
+
+    public function notificationHistory(): ResponseInterface
+    {
+        if ($denied = $this->guard('notifications.manage')) {
+            return $denied;
+        }
+
+        return $this->ok($this->alerts()->history($this->tenant()));
+    }
+
+    public function notificationRecipients(int $id): ResponseInterface
+    {
+        if ($denied = $this->guard('notifications.manage')) {
+            return $denied;
+        }
+
+        return $this->run(fn () => $this->ok($this->alerts()->recipients($this->tenant(), $id)));
+    }
+
+    public function sendNotification(): ResponseInterface
+    {
+        if ($denied = $this->guard('notifications.manage')) {
+            return $denied;
+        }
+
+        return $this->run(function () {
+            $input = $this->input();
+
+            return $this->ok($this->alerts()->sendManual(
+                $this->tenant(),
+                $this->user(),
+                (string) ($input['title'] ?? ''),
+                (string) ($input['message'] ?? ''),
+                is_array($input['recipients'] ?? null) ? $input['recipients'] : [],
+                is_array($input['conditions'] ?? null) ? $input['conditions'] : [],
+            ));
+        });
     }
 
     public function messages(): ResponseInterface
@@ -2010,12 +2288,105 @@ class DeskApi extends BaseController
     }
 
     /**
-     * A Team Head only sees people on the teams they lead. Company roles see everyone.
+     * A manager or team lead only sees people on their team. Company roles see everyone.
      *
      * @param list<array<string, mixed>> $rows
      * @param list<string> $keys
      * @return list<array<string, mixed>>
      */
+    private function alerts(): PushService
+    {
+        return new PushService(db_connect());
+    }
+
+    /**
+     * @param array<string, mixed> $context
+     */
+    private function alert(string $event, array $context): void
+    {
+        try {
+            $context['actor'] = $context['actor'] ?? $this->personName($this->user());
+            $this->alerts()->trigger($this->tenant(), $this->user(), $event, $context);
+        } catch (Throwable $e) {
+        }
+    }
+
+    private function alertLead(int $id): void
+    {
+        $lead = $this->sites->lead($this->tenant(), $id);
+
+        if ($lead === null) {
+            return;
+        }
+
+        $ownerId = (int) ($lead['owner_id'] ?? 0);
+        $this->alert('lead.assigned', [
+            'subject_user_id' => $ownerId,
+            'subject_type'    => 'lead',
+            'subject_id'      => $id,
+            'lead'            => (string) ($lead['name'] ?? ''),
+            'name'            => (string) ($lead['owner_name'] ?? ''),
+        ]);
+    }
+
+    private function personName(int $userId): string
+    {
+        if ($userId < 1) {
+            return '';
+        }
+
+        $row = db_connect()->table('users')->select('name')->where('id', $userId)->get()->getRowArray();
+
+        return trim((string) ($row['name'] ?? ''));
+    }
+
+    private function leadGate(int $id): ?ResponseInterface
+    {
+        $lead = $this->sites->lead($this->tenant(), $id);
+
+        if ($lead === null || $this->outsideTeam($lead, ['owner_id'])) {
+            return $this->fail('That lead is not in this workspace.', 404);
+        }
+
+        return null;
+    }
+
+    private function outsideTeam(array $row, array $keys): bool
+    {
+        $scope = $this->viewScope();
+
+        if (($scope['level'] ?? '') !== 'team') {
+            return false;
+        }
+
+        $allowed = array_flip($scope['user_ids'] ?? []);
+
+        foreach ($keys as $key) {
+            $id = (int) ($row[$key] ?? 0);
+
+            if ($id > 0 && isset($allowed[$id])) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private function teamRecord(string $table, int $id, array $keys): ?ResponseInterface
+    {
+        $row = db_connect()->table($table)
+            ->where('tenant_id', $this->tenant())
+            ->where('id', $id)
+            ->get()
+            ->getRowArray();
+
+        if ($row === null || $this->outsideTeam($row, $keys)) {
+            return $this->fail('That record is not in this workspace.', 404);
+        }
+
+        return null;
+    }
+
     private function teamRows(array $rows, array $keys): array
     {
         $scope = $this->viewScope();
