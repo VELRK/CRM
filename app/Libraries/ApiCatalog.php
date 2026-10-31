@@ -162,23 +162,27 @@ class ApiCatalog
             self::entry('Notifications', 'FR-15', 'Forget a phone', 'POST', '/api/v1/devices/deactivate', true, null, [
                 'token' => 'fcm-device-token',
             ], ['ok' => true, 'data' => ['saved' => true]]),
-            self::entry('Notifications', 'FR-15', 'Notifications', 'GET', '/api/v1/notifications', true, null, null, ['ok' => true, 'data' => [['id' => 1, 'title' => 'Follow-up due', 'body' => 'Call Ravi', 'read_at' => null]]]),
+            self::entry('Notifications', 'FR-15', 'Notifications', 'GET', '/api/v1/notifications', true, null, null, ['ok' => true, 'data' => [['id' => 1, 'title' => 'Follow-up due', 'body' => 'Call Ravi', 'kind' => 'text', 'media' => null, 'read_at' => null]]]),
             self::entry('Notifications', 'FR-15', 'Push rules', 'GET', '/api/v1/notifications/rules', true, 'notifications.manage', null, ['ok' => true, 'data' => [[
-                'id' => 1, 'notification_name' => 'New task', 'module' => 'Tasks', 'event_key' => 'task.assigned', 'title' => 'New task', 'message' => '{name}, you have a task: {task}', 'active' => true,
+                'id' => 1, 'notification_name' => 'New task', 'module' => 'Tasks', 'event_key' => 'task.assigned', 'kind' => 'text', 'media' => '', 'title' => 'New task', 'message' => '{name}, you have a task: {task}', 'active' => true,
                 'recipients' => ['subject' => true, 'team_head' => true, 'all_active' => false, 'users' => [], 'teams' => [], 'roles' => [], 'designations' => []],
                 'conditions' => ['active_only' => true, 'project_id' => 0, 'designation' => '', 'manager_user_id' => 0],
             ]]]),
             self::entry('Notifications', 'FR-15', 'Save a push rule', 'POST', '/api/v1/notifications/rules', true, 'notifications.manage', [
-                'name' => 'New task', 'event_key' => 'task.assigned', 'title' => 'New task', 'message' => '{name}, you have a task: {task}', 'active' => true,
+                'name' => 'New task', 'event_key' => 'task.assigned', 'kind' => 'text', 'media' => '', 'title' => 'New task', 'message' => '{name}, you have a task: {task}', 'active' => true,
                 'recipients' => ['subject' => true, 'team_head' => false, 'users' => [], 'teams' => [], 'roles' => [], 'designations' => []],
                 'conditions' => ['active_only' => true],
             ], ['ok' => true, 'data' => ['id' => 1]]),
+            self::entry('Notifications', 'FR-15', 'Upload a notification video', 'POST', '/api/v1/notifications/media', true, 'notifications.manage', [
+                'file' => 'multipart MP4, WebM, or MOV up to 20 MB',
+            ], ['ok' => true, 'data' => ['media' => '/api/v1/notifications/media/0123456789abcdef0123456789abcdef.mp4']]),
+            self::entry('Notifications', 'FR-15', 'Play a notification video', 'GET', '/api/v1/notifications/media/0123456789abcdef0123456789abcdef.mp4', true, null, null, 'MP4, WebM, or MOV video'),
             self::entry('Notifications', 'FR-15', 'Send an announcement', 'POST', '/api/v1/notifications/send', true, 'notifications.manage', [
-                'title' => 'Site meeting', 'message' => 'Meet at the east gate at 10.',
+                'kind' => 'video', 'media' => 'https://cdn.example.com/briefing.mp4', 'title' => 'Site meeting', 'message' => 'Meet at the east gate at 10.',
                 'recipients' => ['teams' => [1]], 'conditions' => ['active_only' => true],
-            ], ['ok' => true, 'data' => ['recipients' => 4]]),
+            ], ['ok' => true, 'data' => ['recipients' => 4, 'kind' => 'video']]),
             self::entry('Notifications', 'FR-15', 'Push history', 'GET', '/api/v1/notifications/history', true, 'notifications.manage', null, ['ok' => true, 'data' => [[
-                'id' => 1, 'event_key' => 'task.assigned', 'title' => 'New task', 'message' => 'You have a task', 'total_recipients' => 1, 'successful_count' => 0, 'failed_count' => 1, 'created_at' => '2026-10-31 11:00:00',
+                'id' => 1, 'event_key' => 'task.assigned', 'kind' => 'text', 'media' => null, 'title' => 'New task', 'message' => 'You have a task', 'total_recipients' => 1, 'successful_count' => 0, 'failed_count' => 1, 'created_at' => '2026-10-31 11:00:00',
             ]]]),
             self::entry('Notifications', 'FR-15', 'Mark all read', 'POST', '/api/v1/notifications/read', true, null, new \stdClass(), ['ok' => true, 'data' => ['read' => true]]),
 

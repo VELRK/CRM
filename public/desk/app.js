@@ -37,7 +37,7 @@ const lists = {
     locations: { path: '/api/v1/attendance/locations', kind: 'locations', lede: '', columns: [] },
     incentives: { path: '/api/v1/incentives', lede: 'Commission rows and what is still pending.', columns: [col('User', 'user_name'), col('Project', 'project_name'), col('Plot', 'plot_no'), col('Status', 'status'), col('Amount', 'amount_minor')] },
     activity: { path: '/api/v1/activity', lede: 'What changed in this workspace.', columns: [col('When', 'created_at'), col('Person', 'user_name'), col('Action', 'action'), col('Record', 'subject_type'), col('Id', 'subject_id'), col('Detail', 'detail')] },
-    notifications: { path: '/api/v1/notifications', lede: 'Messages for this sign-in.', columns: [col('Title', 'title'), col('Message', 'body'), col('Read', 'read_at')] },
+    notifications: { path: '/api/v1/notifications', lede: 'Messages for this sign-in.', columns: [col('Title', 'title'), col('Message', 'body'), col('Type', 'kind'), col('Read', 'read_at')] },
     whatsapp: { path: '/api/v1/whatsapp/templates', lede: 'Message templates stored for this workspace.', columns: [col('Name', 'name'), col('Language', 'language'), col('Message', 'body')], actions: ['template'] },
 };
 
@@ -1118,6 +1118,7 @@ function LeadPage({ leadId, onBack }) {
             <button type="button" class=${section === 'overview' ? 'on' : ''} onClick=${() => setSection('overview')}>Overview</button>
             <button type="button" class=${section === 'notes' ? 'on' : ''} onClick=${() => setSection('notes')}>Notes <em>${notes.length}</em></button>
             <button type="button" class=${section === 'activities' ? 'on' : ''} onClick=${() => setSection('activities')}>Open Activities <em>${openCount}</em></button>
+            <button type="button" class=${section === 'activity' ? 'on' : ''} onClick=${() => setSection('activity')}>Lead activity <em>${history.length}</em></button>
         </aside>
         <div class="lead-main">
             ${error ? html`<p class="error">${error}</p>` : null}
@@ -1185,7 +1186,6 @@ function LeadPage({ leadId, onBack }) {
                     <div class="card-head"><h3>Deals</h3><button type="button" class="add-round" onClick=${() => setEditor('deal')}><i>+</i> Add Deal</button></div>
                     ${deals.length === 0 ? html`<div class="empty-deal"><svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#c5c9d1" stroke-width="1.4"><path d="M8 4h8l2 3v13H6V7l2-3z"/><path d="M9 12h6M9 16h6"/></svg></div>` : html`<div class="deal-list">${deals.map((row) => html`<article key=${row.id}><strong>${dealLabel(row.deal_stage)}</strong><span>${money(row.total_deal_value)}</span><p>${(row.project_details || []).map((item) => item.projectName).filter(Boolean).join(', ') || row.deal_description || '—'}</p></article>`)}</div>`}
                 </section>
-                <${LeadStory} rows=${history} />
             </div>` : null}
             ${section === 'notes' ? html`<section class="lead-card">
                 <div class="card-head"><h3>Notes <em class="count-badge">${notes.length}</em></h3>
@@ -1222,8 +1222,8 @@ function LeadPage({ leadId, onBack }) {
                         <td>${['COMPLETED', 'CANCELLED'].includes(String(row.display_status || '').toUpperCase()) ? null : html`<button class="act-done" type="button" onClick=${() => finish(tab, row)}>Mark Done</button>`}</td>
                     </tr>`)}
                 </tbody></table>`}
-                <${LeadStory} rows=${history} />
             </section>` : null}
+            ${section === 'activity' ? html`<${LeadStory} rows=${history} />` : null}
         </div>
         ${stageOpen ? html`<div class="modal-back" onClick=${() => setStageOpen(false)}><form class="filter-box" onClick=${(event) => event.stopPropagation()} onSubmit=${saveStage}>
             <header><h2>Lead stage</h2><button class="filter-x" type="button" onClick=${() => setStageOpen(false)}>×</button></header>
@@ -1553,20 +1553,52 @@ function regCell(row) {
     if (row.registration_followup) return html`<span class="tag warn">Pending</span>`;
     return '—';
 }
+const ACTIVITY_LABEL = { created: 'Created', allocated: 'Allocated', transferred: 'Transferred', stage: 'Stage', followup: 'Follow-up', followup_done: 'Follow-up done', visit: 'Visit', visit_done: 'Visit done', task: 'Task', task_done: 'Task done', note: 'Note', deal: 'Deal', whatsapp: 'WhatsApp', achievement: 'Achievement' };
 function LeadStory({ rows }) {
     const list = Array.isArray(rows) ? rows : [];
+    const [query, setQuery] = useState('');
+    const [action, setAction] = useState('');
+    const [page, setPage] = useState(0);
+    const [pageSize, setPageSize] = useState(10);
+    const actions = [...new Set(list.map((row) => row.action).filter(Boolean))];
+    const needle = query.trim().toLowerCase();
+    const shown = list.filter((row) => {
+        if (action && row.action !== action) return false;
+        if (!needle) return true;
+        return [row.title, row.who, row.body, row.meta, ACTIVITY_LABEL[row.action] || row.action].join(' ').toLowerCase().includes(needle);
+    });
+    useEffect(() => { setPage(0); }, [query, action, pageSize, list.length]);
+    const pages = Math.max(1, Math.ceil(shown.length / pageSize));
+    const safePage = Math.min(page, pages - 1);
+    const visible = shown.slice(safePage * pageSize, safePage * pageSize + pageSize);
+    const fromRow = shown.length === 0 ? 0 : safePage * pageSize + 1;
+    const toRow = Math.min(shown.length, safePage * pageSize + visible.length);
     return html`<section class="lead-card">
-        <h3>Lead activity <em class="count-badge">${list.length}</em></h3>
-        ${list.length === 0 ? html`<p class="empty-line">No activity yet</p>` : html`<ol class="lead-story">
-            ${list.map((row, index) => html`<li key=${String(index) + (row.at || '') + row.title}>
-                <span class="dot"></span>
-                <div>
-                    <strong>${row.title}</strong>
-                    <small>${row.meta || prettyWhen(row.at)}</small>
-                    ${row.body ? html`<p>${row.body}</p>` : null}
-                </div>
-            </li>`)}
-        </ol>`}
+        <div class="card-head"><h3>Lead activity <em class="count-badge">${shown.length}</em></h3></div>
+        <div class="activity-filters">
+            <label>Search<input placeholder="Search activity" value=${query} onInput=${(event) => setQuery(event.target.value)} /></label>
+            <label>Action<select value=${action} onChange=${(event) => setAction(event.target.value)}><option value="">All actions</option>${actions.map((key) => html`<option key=${key} value=${key}>${ACTIVITY_LABEL[key] || key}</option>`)}</select></label>
+        </div>
+        <div class="table-wrap"><table class="board-table"><thead><tr><th>When</th><th>Action</th><th>Who</th><th>Detail</th></tr></thead><tbody>
+            ${visible.length === 0 ? html`<tr><td colSpan="4">${list.length === 0 ? 'No activity yet' : 'Nothing matches this filter.'}</td></tr>` : visible.map((row, index) => html`<tr key=${String(safePage) + '-' + index + (row.at || '')}>
+                <td>${prettyWhen(row.at)}</td>
+                <td><strong>${row.title || ACTIVITY_LABEL[row.action] || row.action || '—'}</strong></td>
+                <td>${row.who || '—'}</td>
+                <td>${row.body || '—'}</td>
+            </tr>`)}
+        </tbody></table></div>
+        <div class="pager">
+            <span class="muted">${shown.length === 0 ? 'Showing 0' : 'Showing ' + fromRow + '–' + toRow + ' of ' + shown.length}</span>
+            <div>
+                <label class="page-size">Rows
+                    <select value=${String(pageSize)} onChange=${(event) => setPageSize(Number(event.target.value))}>
+                        ${[10, 25, 50].map((size) => html`<option key=${size} value=${String(size)}>${size}</option>`)}
+                    </select>
+                </label>
+                <button class="ghost" type="button" disabled=${safePage === 0} onClick=${() => setPage(safePage - 1)}>Previous</button>
+                <button class="ghost" type="button" disabled=${safePage >= pages - 1} onClick=${() => setPage(safePage + 1)}>Next</button>
+            </div>
+        </div>
     </section>`;
 }
 function BookingForm({ plot, people, onDone, onClose }) {
@@ -3153,8 +3185,45 @@ function NoticeBoard() {
         </section>
     </section>`;
 }
+function ChipSelect({ label, options, values, onChange }) {
+    const [open, setOpen] = useState(false);
+    const [query, setQuery] = useState('');
+    const root = useRef(null);
+    useEffect(() => {
+        if (!open) return undefined;
+        function close(event) {
+            if (root.current && !root.current.contains(event.target)) setOpen(false);
+        }
+        document.addEventListener('mousedown', close);
+        return () => document.removeEventListener('mousedown', close);
+    }, [open]);
+    const picked = new Set((values || []).map(String));
+    const selected = options.filter((option) => picked.has(String(option.value)));
+    const needle = query.trim().toLowerCase();
+    const rest = options.filter((option) => !picked.has(String(option.value)) && String(option.label).toLowerCase().includes(needle));
+    function add(value) {
+        onChange([...picked, String(value)]);
+        setQuery('');
+    }
+    function remove(value, event) {
+        event.stopPropagation();
+        const next = new Set(picked);
+        next.delete(String(value));
+        onChange(next);
+    }
+    return html`<div class="chip-select" ref=${root}>
+        <span>${label}</span>
+        <div class="chip-box" onClick=${() => setOpen(true)}>
+            ${selected.map((option) => html`<button type="button" class="pick-chip" key=${option.value} onClick=${(event) => remove(option.value, event)}>${option.label}<i>×</i></button>`)}
+            <input placeholder=${selected.length ? 'Add more' : 'Search ' + label.toLowerCase()} value=${query} onFocus=${() => setOpen(true)} onKeyDown=${(event) => { if (event.key === 'Enter') event.preventDefault(); }} onInput=${(event) => { setQuery(event.target.value); setOpen(true); }} />
+        </div>
+        ${open ? html`<div class="chip-menu">
+            ${rest.length === 0 ? html`<p class="empty-line">Nothing else to add</p>` : rest.slice(0, 40).map((option) => html`<button type="button" key=${option.value} onClick=${() => add(option.value)}>${option.label}</button>`)}
+        </div>` : null}
+    </div>`;
+}
 function PushBoard() {
-    const blank = () => ({ name: '', event_key: 'task.assigned', title: '', message: '', active: true, recipients: { subject: true, team_head: false, all_active: false, users: [], teams: [], roles: [], designations: [] }, conditions: { active_only: true, project_id: 0, designation: '', manager_user_id: 0 } });
+    const blank = () => ({ name: '', event_key: 'task.assigned', kind: 'text', media: '', title: '', message: '', active: true, recipients: { subject: true, team_head: false, all_active: false, users: [], teams: [], roles: [], designations: [] }, conditions: { active_only: true, project_id: 0, designation: '', manager_user_id: 0 } });
     const [tab, setTab] = useState('rules');
     const [summary, setSummary] = useState({ total: 0, sent: 0, failed: 0, push: false });
     const [options, setOptions] = useState({ events: [], staff: [], teams: [], roles: [], designations: [], projects: [], push: false });
@@ -3162,7 +3231,7 @@ function PushBoard() {
     const [history, setHistory] = useState([]);
     const [people, setPeople] = useState([]);
     const [form, setForm] = useState(blank());
-    const [announce, setAnnounce] = useState({ title: '', message: '', recipients: { subject: false, team_head: false, all_active: false, users: [], teams: [], roles: [], designations: [] }, conditions: { active_only: true, project_id: 0, designation: '', manager_user_id: 0 } });
+    const [announce, setAnnounce] = useState({ kind: 'text', media: '', title: '', message: '', recipients: { subject: false, team_head: false, all_active: false, users: [], teams: [], roles: [], designations: [] }, conditions: { active_only: true, project_id: 0, designation: '', manager_user_id: 0 } });
     const [error, setError] = useState('');
     function load() {
         setError('');
@@ -3172,33 +3241,60 @@ function PushBoard() {
         call('/api/v1/notifications/history').then((rows) => setHistory(Array.isArray(rows) ? rows : [])).catch(() => {});
     }
     useEffect(() => { load(); }, []);
-    function chosen(bag, key, event) {
-        const values = Array.from(event.target.selectedOptions).map((option) => option.value);
-        const next = key === 'designations' ? values : values.map((item) => Number(item));
-        return { ...bag, recipients: { ...bag.recipients, [key]: next } };
+    function setList(bag, setBag, key, values) {
+        const next = key === 'designations' ? [...values] : [...values].map((item) => Number(item));
+        setBag({ ...bag, recipients: { ...bag.recipients, [key]: next } });
     }
     function boxes(bag, setBag, showSubject) {
         const mark = (key) => (event) => setBag({ ...bag, recipients: { ...bag.recipients, [key]: event.target.checked } });
+        const pill = (text, on, change) => html`<label class=${on ? 'on' : ''}><input type="checkbox" checked=${on} onChange=${change} />${text}</label>`;
         return html`<div>
-        <div class="fact-grid">
-            <div>
-                ${showSubject ? html`<label class="check"><input type="checkbox" checked=${!!bag.recipients.subject} onChange=${mark('subject')} /> The person this event is about</label>` : null}
-                <label class="check"><input type="checkbox" checked=${!!bag.recipients.team_head} onChange=${mark('team_head')} /> Their team head</label>
-                <label class="check"><input type="checkbox" checked=${!!bag.recipients.all_active} onChange=${mark('all_active')} /> All active people</label>
-                <label class="check"><input type="checkbox" checked=${bag.conditions.active_only !== false} onChange=${(event) => setBag({ ...bag, conditions: { ...bag.conditions, active_only: event.target.checked } })} /> Active people only</label>
-            </div>
-            <div>
-                <label>Employees<select multiple size="5" value=${(bag.recipients.users || []).map(String)} onChange=${(event) => setBag(chosen(bag, 'users', event))}>${options.staff.map((row) => html`<option key=${row.user_id} value=${String(row.user_id)}>${row.name}</option>`)}</select></label>
-                <label>Teams<select multiple size="4" value=${(bag.recipients.teams || []).map(String)} onChange=${(event) => setBag(chosen(bag, 'teams', event))}>${options.teams.map((row) => html`<option key=${row.id} value=${String(row.id)}>${row.name}</option>`)}</select></label>
-                <label>Roles<select multiple size="4" value=${(bag.recipients.roles || []).map(String)} onChange=${(event) => setBag(chosen(bag, 'roles', event))}>${options.roles.map((row) => html`<option key=${row.id} value=${String(row.id)}>${row.name}</option>`)}</select></label>
-                <label>Designations<select multiple size="4" value=${bag.recipients.designations || []} onChange=${(event) => setBag(chosen(bag, 'designations', event))}>${options.designations.map((row) => html`<option key=${row.code} value=${row.code}>${row.label}</option>`)}</select></label>
-            </div>
+        <div class="push-toggles">
+            ${showSubject ? pill('The person this event is about', !!bag.recipients.subject, mark('subject')) : null}
+            ${pill('Their team head', !!bag.recipients.team_head, mark('team_head'))}
+            ${pill('All active people', !!bag.recipients.all_active, mark('all_active'))}
+            ${pill('Active people only', bag.conditions.active_only !== false, (event) => setBag({ ...bag, conditions: { ...bag.conditions, active_only: event.target.checked } }))}
+        </div>
+        <div class="chip-picks">
+            <${ChipSelect} label="Employees" options=${options.staff.map((row) => ({ value: String(row.user_id), label: row.name }))} values=${(bag.recipients.users || []).map(String)} onChange=${(values) => setList(bag, setBag, 'users', values)} />
+            <${ChipSelect} label="Teams" options=${options.teams.map((row) => ({ value: String(row.id), label: row.name }))} values=${(bag.recipients.teams || []).map(String)} onChange=${(values) => setList(bag, setBag, 'teams', values)} />
+            <${ChipSelect} label="Roles" options=${options.roles.map((row) => ({ value: String(row.id), label: row.name }))} values=${(bag.recipients.roles || []).map(String)} onChange=${(values) => setList(bag, setBag, 'roles', values)} />
+            <${ChipSelect} label="Designations" options=${options.designations.map((row) => ({ value: row.code, label: row.label }))} values=${bag.recipients.designations || []} onChange=${(values) => setList(bag, setBag, 'designations', values)} />
         </div>
         <div class="fact-grid">
             <label>Project<select value=${String(bag.conditions.project_id || 0)} onChange=${(event) => setBag({ ...bag, conditions: { ...bag.conditions, project_id: Number(event.target.value) } })}><option value="0">Any project</option>${options.projects.map((row) => html`<option key=${row.id} value=${String(row.id)}>${row.name}</option>`)}</select></label>
             <label>Limit to designation<select value=${bag.conditions.designation || ''} onChange=${(event) => setBag({ ...bag, conditions: { ...bag.conditions, designation: event.target.value } })}><option value="">Any designation</option>${options.designations.map((row) => html`<option key=${row.code} value=${row.code}>${row.label}</option>`)}</select></label>
             <label>People who report to<select value=${String(bag.conditions.manager_user_id || 0)} onChange=${(event) => setBag({ ...bag, conditions: { ...bag.conditions, manager_user_id: Number(event.target.value) } })}><option value="0">Any team head</option>${options.staff.map((row) => html`<option key=${row.user_id} value=${String(row.user_id)}>${row.name}</option>`)}</select></label>
         </div></div>`;
+    }
+    const kindLabel = { text: 'Text', message: 'Message', video: 'Video' };
+    function kindFields(bag, setBag) {
+        async function attach(event) {
+            const file = event.target.files && event.target.files[0];
+            event.target.value = '';
+            if (!file) return;
+            setError('');
+            try {
+                const headers = { Accept: 'application/json' };
+                const token = localStorage.getItem(tokenKey);
+                if (token) headers.Authorization = 'Bearer ' + token;
+                const body = new FormData();
+                body.append('file', file);
+                const response = await fetch(apiPath('/api/v1/notifications/media'), { method: 'POST', headers, body });
+                const payload = await response.json();
+                if (!response.ok || payload.ok === false) throw new Error(payload.error || 'The video was not saved.');
+                setBag({ ...bag, kind: 'video', media: payload.data.media || '' });
+            } catch (e) { setError(e.message); }
+        }
+        return html`<div class="fact-grid">
+            <label>Type<select value=${bag.kind || 'text'} onChange=${(event) => setBag({ ...bag, kind: event.target.value, media: event.target.value === 'video' ? (bag.media || '') : '' })}>
+                <option value="text">Text</option>
+                <option value="message">Message</option>
+                <option value="video">Video</option>
+            </select></label>
+            ${(bag.kind || 'text') === 'video' ? html`<label>Video link<input value=${bag.media || ''} placeholder="https://..." onInput=${(event) => setBag({ ...bag, media: event.target.value })} /></label>
+            <label>Upload a video<input type="file" accept="video/mp4,video/webm,video/quicktime,.mp4,.webm,.mov" onChange=${attach} /></label>` : null}
+        </div>`;
     }
     async function saveRule(event) {
         event.preventDefault();
@@ -3219,7 +3315,7 @@ function PushBoard() {
         setError('');
         try {
             await call('/api/v1/notifications/send', { method: 'POST', body: announce });
-            setAnnounce({ ...announce, title: '', message: '' });
+            setAnnounce({ ...announce, kind: 'text', media: '', title: '', message: '' });
             setTab('history');
             load();
         } catch (e) { setError(e.message); }
@@ -3249,14 +3345,15 @@ function PushBoard() {
                 <label>Title<input value=${form.title} onInput=${(event) => setForm({ ...form, title: event.target.value })} /></label>
                 <label>Message<textarea value=${form.message} onInput=${(event) => setForm({ ...form, message: event.target.value })}></textarea></label>
             </div>
-            <p class="fine">Placeholders: {name} {lead} {task} {place} {actor}</p>
+            ${kindFields(form, setForm)}
+            <p class="fine">Text and message are written. A video uses an https link or an MP4, WebM, or MOV up to 20 MB. Placeholders: {name} {lead} {task} {place} {actor}</p>
             ${boxes(form, setForm, true)}
-            <label class="check"><input type="checkbox" checked=${form.active !== false} onChange=${(event) => setForm({ ...form, active: event.target.checked })} /> Active</label>
+            <div class="push-toggles"><label class=${form.active !== false ? 'on' : ''}><input type="checkbox" checked=${form.active !== false} onChange=${(event) => setForm({ ...form, active: event.target.checked })} /> Active</label></div>
             <div class="form-actions"><button class="primary" type="submit">Save</button><button class="ghost" type="button" onClick=${() => setForm(blank())}>Clear</button></div>
         </form>
-        <div class="table-wrap"><table class="board-table"><thead><tr><th>Name</th><th>Event</th><th>Title</th><th>Active</th><th></th></tr></thead><tbody>
-            ${rules.length === 0 ? html`<tr><td colSpan="5">No rules yet.</td></tr>` : rules.map((row) => html`<tr key=${row.id}>
-                <td>${row.notification_name}</td><td>${row.event_key}</td><td>${row.title}</td><td>${row.active ? 'Active' : 'Inactive'}</td>
+        <div class="table-wrap"><table class="board-table"><thead><tr><th>Name</th><th>Event</th><th>Type</th><th>Title</th><th>Active</th><th></th></tr></thead><tbody>
+            ${rules.length === 0 ? html`<tr><td colSpan="6">No rules yet.</td></tr>` : rules.map((row) => html`<tr key=${row.id}>
+                <td>${row.notification_name}</td><td>${row.event_key}</td><td>${kindLabel[row.kind] || 'Text'}</td><td>${row.title}</td><td>${row.active ? 'Active' : 'Inactive'}</td>
                 <td class="row-actions">${actIcon('edit', 'Edit', () => setForm({ ...blank(), ...row, name: row.notification_name }))}${row.active ? actIcon('delete', 'Stop', () => removeRule(row)) : null}</td>
             </tr>`)}
         </tbody></table></div></div>` : null}
@@ -3266,12 +3363,13 @@ function PushBoard() {
                 <label>Title<input value=${announce.title} onInput=${(event) => setAnnounce({ ...announce, title: event.target.value })} /></label>
                 <label>Message<textarea value=${announce.message} onInput=${(event) => setAnnounce({ ...announce, message: event.target.value })}></textarea></label>
             </div>
+            ${kindFields(announce, setAnnounce)}
             ${boxes(announce, setAnnounce, false)}
             <div class="form-actions"><button class="primary" type="submit">Send</button></div>
         </form>` : null}
-        ${tab === 'history' ? html`<div><div class="table-wrap"><table class="board-table"><thead><tr><th>When</th><th>Event</th><th>Title</th><th>By</th><th>Sent</th><th>Failed</th></tr></thead><tbody>
-            ${history.length === 0 ? html`<tr><td colSpan="6">Nothing sent yet.</td></tr>` : history.map((row) => html`<tr key=${row.id} onClick=${() => openHistory(row)}>
-                <td>${prettyWhen(row.created_at)}</td><td>${row.event_key}</td><td>${row.title}</td><td>${row.triggered_by_name || '—'}</td><td>${row.successful_count}</td><td>${row.failed_count}</td>
+        ${tab === 'history' ? html`<div><div class="table-wrap"><table class="board-table"><thead><tr><th>When</th><th>Event</th><th>Type</th><th>Title</th><th>By</th><th>Sent</th><th>Failed</th></tr></thead><tbody>
+            ${history.length === 0 ? html`<tr><td colSpan="7">Nothing sent yet.</td></tr>` : history.map((row) => html`<tr key=${row.id} onClick=${() => openHistory(row)}>
+                <td>${prettyWhen(row.created_at)}</td><td>${row.event_key}</td><td>${kindLabel[row.kind] || 'Text'}</td><td>${row.title}</td><td>${row.triggered_by_name || '—'}</td><td>${row.successful_count}</td><td>${row.failed_count}</td>
             </tr>`)}
         </tbody></table></div>
         ${pickedHistory ? html`<section class="panel-card"><h3>Recipients</h3>${people.length === 0 ? html`<p class="empty-line">No recipients.</p>` : html`<table class="board-table"><thead><tr><th>Person</th><th>Status</th><th>Detail</th><th>When</th></tr></thead><tbody>

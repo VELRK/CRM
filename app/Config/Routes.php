@@ -138,6 +138,8 @@ $routes->group('api/v1', ['filter' => 'apiauth'], static function ($routes) {
     $routes->post('notifications/rules', 'Api\DeskApi::saveNotificationRule');
     $routes->get('notifications/history/(:num)', 'Api\DeskApi::notificationRecipients/$1');
     $routes->get('notifications/history', 'Api\DeskApi::notificationHistory');
+    $routes->post('notifications/media', 'Api\DeskApi::uploadNotificationMedia');
+    $routes->get('notifications/media/(:segment)', 'Api\DeskApi::notificationMedia/$1');
     $routes->post('notifications/send', 'Api\DeskApi::sendNotification');
     $routes->get('notifications', 'Api\DeskApi::notifications');
     $routes->post('notifications/read', 'Api\DeskApi::readNotifications');

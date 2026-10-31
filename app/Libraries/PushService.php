@@ -128,14 +128,24 @@ class PushService
      * @param array<string, mixed> $conditions
      * @return array<string, mixed>
      */
-    public function sendManual(int $tenantId, int $actorId, string $title, string $message, array $recipients, array $conditions): array
+    public function sendManual(int $tenantId, int $actorId, string $title, string $message, array $recipients, array $conditions, array $content = []): array
     {
         $this->ready();
+        $this->ensureMediaColumns();
         $title = trim($title);
         $message = trim($message);
+        $piece = $this->content($content);
 
-        if ($title === '' || $message === '') {
-            throw new RuntimeException('An announcement needs a title and a message.');
+        if ($title === '') {
+            throw new RuntimeException('An announcement needs a title.');
+        }
+
+        if ($piece['kind'] !== 'video' && $message === '') {
+            throw new RuntimeException('An announcement needs a message.');
+        }
+
+        if ($message === '') {
+            $message = 'Open the video.';
         }
 
         $rule = [
@@ -143,12 +153,13 @@ class PushService
             'event_key'             => 'manual',
             'title'                 => mb_substr($title, 0, 190),
             'message'               => mb_substr($message, 0, 500),
+            'payload_json'          => json_encode($piece),
             'recipient_config_json' => json_encode($this->recipientBag($recipients)),
             'conditions_json'       => json_encode($this->conditions($conditions)),
         ];
         $count = $this->deliver($tenantId, $actorId, $rule, ['subject_type' => 'announcement', 'subject_id' => 0]);
 
-        return ['recipients' => $count];
+        return ['recipients' => $count, 'kind' => $piece['kind']];
     }
 
     /**
@@ -160,8 +171,9 @@ class PushService
             return [];
         }
 
+        $this->ensureMediaColumns();
         $rows = $this->db->table('notification_templates t')
-            ->select('t.id, t.notification_name, t.module, t.event_key, t.title, t.message, t.status, c.recipient_config_json, c.conditions_json, c.is_enabled')
+            ->select('t.id, t.notification_name, t.module, t.event_key, t.title, t.message, t.payload_json, t.status, c.recipient_config_json, c.conditions_json, c.is_enabled')
             ->join('notification_configurations c', 'c.template_id = t.id AND c.tenant_id = t.tenant_id', 'left')
             ->where('t.tenant_id', $tenantId)
             ->orderBy('t.id', 'DESC')
@@ -169,10 +181,13 @@ class PushService
             ->getResultArray();
 
         foreach ($rows as &$row) {
+            $payload = json_decode((string) ($row['payload_json'] ?? ''), true);
             $row['active'] = ($row['status'] ?? '') === 'active' && (int) ($row['is_enabled'] ?? 0) === 1;
+            $row['kind'] = is_array($payload) && in_array($payload['kind'] ?? '', ['text', 'video', 'message'], true) ? $payload['kind'] : 'text';
+            $row['media'] = $row['kind'] === 'video' && is_array($payload) ? (string) ($payload['media'] ?? '') : '';
             $row['recipients'] = json_decode((string) ($row['recipient_config_json'] ?? ''), true) ?: $this->recipientBag([]);
             $row['conditions'] = json_decode((string) ($row['conditions_json'] ?? ''), true) ?: $this->conditions([]);
-            unset($row['recipient_config_json'], $row['conditions_json'], $row['is_enabled'], $row['status']);
+            unset($row['recipient_config_json'], $row['conditions_json'], $row['payload_json'], $row['is_enabled'], $row['status']);
         }
         unset($row);
 
@@ -185,10 +200,12 @@ class PushService
     public function saveRule(int $tenantId, int $actorId, ?int $id, array $input): int
     {
         $this->ready();
+        $this->ensureMediaColumns();
         $name = trim((string) ($input['name'] ?? $input['notification_name'] ?? ''));
         $event = trim((string) ($input['event_key'] ?? $input['event'] ?? ''));
         $title = trim((string) ($input['title'] ?? ''));
         $message = trim((string) ($input['message'] ?? ''));
+        $piece = $this->content($input);
 
         if ($name === '' || strlen($name) > 120) {
             throw new RuntimeException('Enter a notification name of 120 characters or less.');
@@ -198,8 +215,16 @@ class PushService
             throw new RuntimeException('Choose an event from this workspace.');
         }
 
-        if ($title === '' || $message === '') {
-            throw new RuntimeException('Enter the title and the message people will see.');
+        if ($title === '') {
+            throw new RuntimeException('Enter the title people will see.');
+        }
+
+        if ($piece['kind'] !== 'video' && $message === '') {
+            throw new RuntimeException('Enter the message people will see.');
+        }
+
+        if ($message === '') {
+            $message = 'Open the video.';
         }
 
         $active = ! isset($input['active']) || ! empty($input['active']);
@@ -210,6 +235,7 @@ class PushService
             'event_key'         => $event,
             'title'             => mb_substr($title, 0, 190),
             'message'           => mb_substr($message, 0, 500),
+            'payload_json'      => json_encode($piece),
             'status'            => $active ? 'active' : 'inactive',
             'updated_at'        => $now,
         ];
@@ -293,8 +319,10 @@ class PushService
             return [];
         }
 
+        $this->ensureMediaColumns();
+
         return $this->db->table('notification_logs l')
-            ->select('l.id, l.event_key, l.title, l.message, l.subject_type, l.subject_id, l.total_recipients, l.successful_count, l.failed_count, l.created_at, u.name AS triggered_by_name')
+            ->select('l.id, l.event_key, l.kind, l.media, l.title, l.message, l.subject_type, l.subject_id, l.total_recipients, l.successful_count, l.failed_count, l.created_at, u.name AS triggered_by_name')
             ->join('users u', 'u.id = l.triggered_by', 'left')
             ->where('l.tenant_id', $tenantId)
             ->orderBy('l.id', 'DESC')
@@ -402,11 +430,17 @@ class PushService
         $subjectId = (int) ($context['subject_id'] ?? 0);
         $title = $this->fill((string) ($rule['title'] ?? ''), $context);
         $message = $this->fill((string) ($rule['message'] ?? ''), $context);
+        $payload = json_decode((string) ($rule['payload_json'] ?? ''), true);
+        $kind = is_array($payload) && in_array($payload['kind'] ?? '', ['text', 'video', 'message'], true) ? $payload['kind'] : 'text';
+        $media = $kind === 'video' ? (string) ($payload['media'] ?? '') : '';
         $now = date('Y-m-d H:i:s');
+        $this->ensureMediaColumns();
         $this->db->table('notification_logs')->insert([
             'tenant_id'        => $tenantId,
             'template_id'      => isset($rule['id']) ? (int) $rule['id'] : null,
             'event_key'        => $event,
+            'kind'             => $kind,
+            'media'            => $media !== '' ? mb_substr($media, 0, 500) : null,
             'title'            => mb_substr($title, 0, 190),
             'message'          => mb_substr($message, 0, 500),
             'subject_type'     => $subjectType !== '' ? $subjectType : null,
@@ -427,7 +461,7 @@ class PushService
                 continue;
             }
 
-            $noticeId = $this->notice($tenantId, $userId, $title, $message, $subjectType, $subjectId);
+            $noticeId = $this->notice($tenantId, $userId, $title, $message, $subjectType, $subjectId, $kind, $media);
             $devices = $this->devices($tenantId, $userId);
 
             if ($devices === []) {
@@ -440,6 +474,8 @@ class PushService
             foreach ($devices as $device) {
                 $result = $this->sendFcm((string) $device['device_token'], $title, $message, [
                     'event'        => $event,
+                    'kind'         => $kind,
+                    'media'        => $media,
                     'subject_type' => $subjectType,
                     'subject_id'   => (string) $subjectId,
                 ]);
@@ -748,22 +784,80 @@ class PushService
         return $row !== null;
     }
 
-    private function notice(int $tenantId, int $userId, string $title, string $message, string $subjectType, int $subjectId): int
+    private function notice(int $tenantId, int $userId, string $title, string $message, string $subjectType, int $subjectId, string $kind = 'text', string $media = ''): int
     {
         if (! $this->db->tableExists('notifications')) {
             return 0;
         }
 
+        $this->ensureMediaColumns();
         $this->db->table('notifications')->insert([
             'tenant_id'  => $tenantId,
             'user_id'    => $userId,
             'title'      => mb_substr($title, 0, 190),
             'body'       => mb_substr($message, 0, 255),
+            'kind'       => $kind,
+            'media'      => $media !== '' ? mb_substr($media, 0, 500) : null,
             'href'       => $subjectType !== '' && $subjectId > 0 ? $subjectType . ':' . $subjectId : null,
             'created_at' => date('Y-m-d H:i:s'),
         ]);
 
         return (int) $this->db->insertID();
+    }
+
+    /**
+     * @param array<string, mixed> $input
+     * @return array{kind: string, media: ?string}
+     */
+    private function content(array $input): array
+    {
+        $kind = strtolower(trim((string) ($input['kind'] ?? $input['type'] ?? 'text')));
+
+        if (! in_array($kind, ['text', 'video', 'message'], true)) {
+            throw new RuntimeException('A notification can be text, video, or message.');
+        }
+
+        if ($kind !== 'video') {
+            return ['kind' => $kind, 'media' => null];
+        }
+
+        $media = trim((string) ($input['media'] ?? $input['video'] ?? ''));
+        $local = preg_match('#^/api/v1/notifications/media/[a-f0-9]{32}\.(mp4|webm|mov)$#', $media) === 1;
+        $remote = filter_var($media, FILTER_VALIDATE_URL) !== false && preg_match('#^https://#i', $media) === 1;
+
+        if ($media === '' || strlen($media) > 500 || (! $local && ! $remote)) {
+            throw new RuntimeException('Add an https video link, or upload an MP4, WebM, or MOV file.');
+        }
+
+        return ['kind' => 'video', 'media' => $media];
+    }
+
+    public function ensureMediaColumns(): void
+    {
+        $forge = \Config\Database::forge();
+
+        foreach (['notification_logs', 'notifications'] as $table) {
+            if (! $this->db->tableExists($table)) {
+                continue;
+            }
+
+            $columns = [];
+
+            if (! $this->db->fieldExists('kind', $table)) {
+                $columns['kind'] = ['type' => 'VARCHAR', 'constraint' => 16, 'default' => 'text'];
+            }
+
+            if (! $this->db->fieldExists('media', $table)) {
+                $columns['media'] = ['type' => 'VARCHAR', 'constraint' => 500, 'null' => true];
+            }
+
+            if ($columns === []) {
+                continue;
+            }
+
+            $forge->addColumn($table, $columns);
+            $this->db->resetDataCache();
+        }
     }
 
     private function recipientRow(int $tenantId, int $logId, int $userId, ?int $deviceId, int $noticeId, string $status, ?string $messageId, ?string $error, ?string $sentAt): void

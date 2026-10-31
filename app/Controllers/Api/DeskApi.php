@@ -1596,6 +1596,8 @@ class DeskApi extends BaseController
 
     public function notifications(): ResponseInterface
     {
+        $this->alerts()->ensureMediaColumns();
+
         return $this->ok($this->desk->notices($this->tenant(), $this->user()));
     }
 
@@ -1698,6 +1700,116 @@ class DeskApi extends BaseController
         return $this->run(fn () => $this->ok($this->alerts()->recipients($this->tenant(), $id)));
     }
 
+    public function uploadNotificationMedia(): ResponseInterface
+    {
+        if ($denied = $this->guard('notifications.manage')) {
+            return $denied;
+        }
+
+        return $this->run(function () {
+            $file = $this->request->getFile('file');
+
+            if ($file === null || ! $file->isValid()) {
+                throw new RuntimeException('Choose a video file.');
+            }
+
+            $head = (string) file_get_contents($file->getTempName(), false, null, 0, 12);
+            $client = strtolower($file->getClientExtension() ?: '');
+            $webm = str_starts_with($head, "\x1A\x45\xDF\xA3");
+            $ftyp = strlen($head) >= 8 && substr($head, 4, 4) === 'ftyp';
+
+            if ($webm) {
+                $ext = 'webm';
+            } elseif ($ftyp) {
+                $ext = $client === 'mov' ? 'mov' : 'mp4';
+            } else {
+                throw new RuntimeException('Use an MP4, WebM, or MOV video.');
+            }
+
+            if ((int) $file->getSize() < 1 || (int) $file->getSize() > 20 * 1024 * 1024) {
+                throw new RuntimeException('Use a video up to 20 MB.');
+            }
+
+            $dir = WRITEPATH . 'uploads' . DIRECTORY_SEPARATOR . $this->tenant() . DIRECTORY_SEPARATOR . 'notices';
+
+            if (! is_dir($dir) && ! mkdir($dir, 0755, true) && ! is_dir($dir)) {
+                throw new RuntimeException('The file store is not available.');
+            }
+
+            $stored = bin2hex(random_bytes(16)) . '.' . $ext;
+            $file->move($dir, $stored, true);
+
+            return $this->ok(['media' => '/api/v1/notifications/media/' . $stored]);
+        });
+    }
+
+    public function notificationMedia(string $name): ResponseInterface
+    {
+        if (preg_match('/^[a-f0-9]{32}\.(mp4|webm|mov)$/', $name) !== 1) {
+            return $this->fail('That video is not available.', 404);
+        }
+
+        $path = WRITEPATH . 'uploads' . DIRECTORY_SEPARATOR . $this->tenant() . DIRECTORY_SEPARATOR . 'notices' . DIRECTORY_SEPARATOR . $name;
+
+        if (! is_file($path)) {
+            return $this->fail('That video is not available.', 404);
+        }
+
+        $mime = match (strtolower(pathinfo($path, PATHINFO_EXTENSION))) {
+            'webm' => 'video/webm',
+            'mov'  => 'video/quicktime',
+            default => 'video/mp4',
+        };
+        $size = filesize($path);
+
+        if ($size === false || $size < 1) {
+            return $this->fail('That video is not available.', 404);
+        }
+
+        $start = 0;
+        $end = $size - 1;
+        $status = 200;
+        $range = $this->request->getHeaderLine('Range');
+
+        if ($range !== '' && preg_match('/bytes=(\d+)-(\d*)/', $range, $match) === 1) {
+            $start = (int) $match[1];
+            $end = $match[2] === '' ? $size - 1 : (int) $match[2];
+
+            if ($start > $end || $start >= $size) {
+                return $this->response->setStatusCode(416)->setHeader('Content-Range', 'bytes */' . $size)->setBody('');
+            }
+
+            $status = 206;
+        }
+
+        $length = $end - $start + 1;
+        $handle = fopen($path, 'rb');
+
+        if ($handle === false) {
+            return $this->fail('That video is not available.', 404);
+        }
+
+        if ($start > 0) {
+            fseek($handle, $start);
+        }
+
+        $body = (string) fread($handle, $length);
+        fclose($handle);
+        $response = $this->response
+            ->setStatusCode($status)
+            ->setHeader('Content-Type', $mime)
+            ->setHeader('Accept-Ranges', 'bytes')
+            ->setHeader('Content-Length', (string) $length)
+            ->setHeader('Cache-Control', 'private, max-age=60')
+            ->setBody($body);
+
+        if ($status === 206) {
+            $response->setHeader('Content-Range', 'bytes ' . $start . '-' . $end . '/' . $size);
+        }
+
+        return $response;
+    }
+
     public function sendNotification(): ResponseInterface
     {
         if ($denied = $this->guard('notifications.manage')) {
@@ -1714,6 +1826,10 @@ class DeskApi extends BaseController
                 (string) ($input['message'] ?? ''),
                 is_array($input['recipients'] ?? null) ? $input['recipients'] : [],
                 is_array($input['conditions'] ?? null) ? $input['conditions'] : [],
+                [
+                    'kind'  => (string) ($input['kind'] ?? $input['type'] ?? 'text'),
+                    'media' => (string) ($input['media'] ?? $input['video'] ?? ''),
+                ],
             ));
         });
     }
