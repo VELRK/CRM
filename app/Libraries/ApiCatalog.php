@@ -165,18 +165,18 @@ class ApiCatalog
             self::entry('Notifications', 'FR-15', 'Notifications', 'GET', '/api/v1/notifications', true, null, null, ['ok' => true, 'data' => [['id' => 1, 'title' => 'Follow-up due', 'body' => 'Call Ravi', 'kind' => 'text', 'media' => null, 'read_at' => null]]]),
             self::entry('Notifications', 'FR-15', 'Push rules', 'GET', '/api/v1/notifications/rules', true, 'notifications.manage', null, ['ok' => true, 'data' => [[
                 'id' => 1, 'notification_name' => 'New task', 'module' => 'Tasks', 'event_key' => 'task.assigned', 'kind' => 'text', 'media' => '', 'title' => 'New task', 'message' => '{name}, you have a task: {task}', 'active' => true,
-                'recipients' => ['subject' => true, 'team_head' => true, 'all_active' => false, 'users' => [], 'teams' => [], 'roles' => [], 'designations' => []],
+                'recipients' => ['subject' => true, 'subject_team' => false, 'team_head' => true, 'all_active' => false, 'users' => [], 'teams' => [], 'roles' => [], 'designations' => []],
                 'conditions' => ['active_only' => true, 'project_id' => 0, 'designation' => '', 'manager_user_id' => 0],
             ]]]),
             self::entry('Notifications', 'FR-15', 'Save a push rule', 'POST', '/api/v1/notifications/rules', true, 'notifications.manage', [
                 'name' => 'New task', 'event_key' => 'task.assigned', 'kind' => 'text', 'media' => '', 'title' => 'New task', 'message' => '{name}, you have a task: {task}', 'active' => true,
-                'recipients' => ['subject' => true, 'team_head' => false, 'users' => [], 'teams' => [], 'roles' => [], 'designations' => []],
+                'recipients' => ['subject' => true, 'subject_team' => true, 'team_head' => false, 'users' => [], 'teams' => [], 'roles' => [], 'designations' => []],
                 'conditions' => ['active_only' => true],
             ], ['ok' => true, 'data' => ['id' => 1]]),
-            self::entry('Notifications', 'FR-15', 'Upload a notification video', 'POST', '/api/v1/notifications/media', true, 'notifications.manage', [
-                'file' => 'multipart MP4, WebM, or MOV up to 20 MB',
-            ], ['ok' => true, 'data' => ['media' => '/api/v1/notifications/media/0123456789abcdef0123456789abcdef.mp4']]),
-            self::entry('Notifications', 'FR-15', 'Play a notification video', 'GET', '/api/v1/notifications/media/0123456789abcdef0123456789abcdef.mp4', true, null, null, 'MP4, WebM, or MOV video'),
+            self::entry('Notifications', 'FR-15', 'Upload a notification image or video', 'POST', '/api/v1/notifications/media', true, 'notifications.manage', [
+                'file' => 'multipart PNG, JPG, WebP, or GIF up to 8 MB, or MP4, WebM, or MOV up to 20 MB',
+            ], ['ok' => true, 'data' => ['kind' => 'image', 'media' => '/api/v1/notifications/media/0123456789abcdef0123456789abcdef.jpg']]),
+            self::entry('Notifications', 'FR-15', 'Open a notification image or video', 'GET', '/api/v1/notifications/media/0123456789abcdef0123456789abcdef.jpg', true, null, null, 'Image or video file'),
             self::entry('Notifications', 'FR-15', 'Send an announcement', 'POST', '/api/v1/notifications/send', true, 'notifications.manage', [
                 'kind' => 'video', 'media' => 'https://cdn.example.com/briefing.mp4', 'title' => 'Site meeting', 'message' => 'Meet at the east gate at 10.',
                 'recipients' => ['teams' => [1]], 'conditions' => ['active_only' => true],

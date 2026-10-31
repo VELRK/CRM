@@ -3223,7 +3223,7 @@ function ChipSelect({ label, options, values, onChange }) {
     </div>`;
 }
 function PushBoard() {
-    const blank = () => ({ name: '', event_key: 'task.assigned', kind: 'text', media: '', title: '', message: '', active: true, recipients: { subject: true, team_head: false, all_active: false, users: [], teams: [], roles: [], designations: [] }, conditions: { active_only: true, project_id: 0, designation: '', manager_user_id: 0 } });
+    const blank = () => ({ name: '', event_key: 'task.assigned', kind: 'text', media: '', title: '', message: '', active: true, recipients: { subject: true, subject_team: false, team_head: false, all_active: false, users: [], teams: [], roles: [], designations: [] }, conditions: { active_only: true, project_id: 0, designation: '', manager_user_id: 0 } });
     const [tab, setTab] = useState('rules');
     const [summary, setSummary] = useState({ total: 0, sent: 0, failed: 0, push: false });
     const [options, setOptions] = useState({ events: [], staff: [], teams: [], roles: [], designations: [], projects: [], push: false });
@@ -3231,7 +3231,7 @@ function PushBoard() {
     const [history, setHistory] = useState([]);
     const [people, setPeople] = useState([]);
     const [form, setForm] = useState(blank());
-    const [announce, setAnnounce] = useState({ kind: 'text', media: '', title: '', message: '', recipients: { subject: false, team_head: false, all_active: false, users: [], teams: [], roles: [], designations: [] }, conditions: { active_only: true, project_id: 0, designation: '', manager_user_id: 0 } });
+    const [announce, setAnnounce] = useState({ kind: 'text', media: '', title: '', message: '', recipients: { subject: false, subject_team: false, team_head: false, all_active: false, users: [], teams: [], roles: [], designations: [] }, conditions: { active_only: true, project_id: 0, designation: '', manager_user_id: 0 } });
     const [error, setError] = useState('');
     function load() {
         setError('');
@@ -3251,13 +3251,14 @@ function PushBoard() {
         return html`<div>
         <div class="push-toggles">
             ${showSubject ? pill('The person this event is about', !!bag.recipients.subject, mark('subject')) : null}
-            ${pill('Their team head', !!bag.recipients.team_head, mark('team_head'))}
+            ${showSubject ? pill('Their team', !!bag.recipients.subject_team, mark('subject_team')) : null}
+            ${showSubject ? pill('Their team head', !!bag.recipients.team_head, mark('team_head')) : null}
             ${pill('All active people', !!bag.recipients.all_active, mark('all_active'))}
             ${pill('Active people only', bag.conditions.active_only !== false, (event) => setBag({ ...bag, conditions: { ...bag.conditions, active_only: event.target.checked } }))}
         </div>
         <div class="chip-picks">
             <${ChipSelect} label="Employees" options=${options.staff.map((row) => ({ value: String(row.user_id), label: row.name }))} values=${(bag.recipients.users || []).map(String)} onChange=${(values) => setList(bag, setBag, 'users', values)} />
-            <${ChipSelect} label="Teams" options=${options.teams.map((row) => ({ value: String(row.id), label: row.name }))} values=${(bag.recipients.teams || []).map(String)} onChange=${(values) => setList(bag, setBag, 'teams', values)} />
+            <${ChipSelect} label="Particular teams" options=${options.teams.map((row) => ({ value: String(row.id), label: row.name }))} values=${(bag.recipients.teams || []).map(String)} onChange=${(values) => setList(bag, setBag, 'teams', values)} />
             <${ChipSelect} label="Roles" options=${options.roles.map((row) => ({ value: String(row.id), label: row.name }))} values=${(bag.recipients.roles || []).map(String)} onChange=${(values) => setList(bag, setBag, 'roles', values)} />
             <${ChipSelect} label="Designations" options=${options.designations.map((row) => ({ value: row.code, label: row.label }))} values=${bag.recipients.designations || []} onChange=${(values) => setList(bag, setBag, 'designations', values)} />
         </div>
@@ -3267,8 +3268,9 @@ function PushBoard() {
             <label>People who report to<select value=${String(bag.conditions.manager_user_id || 0)} onChange=${(event) => setBag({ ...bag, conditions: { ...bag.conditions, manager_user_id: Number(event.target.value) } })}><option value="0">Any team head</option>${options.staff.map((row) => html`<option key=${row.user_id} value=${String(row.user_id)}>${row.name}</option>`)}</select></label>
         </div></div>`;
     }
-    const kindLabel = { text: 'Text', message: 'Message', video: 'Video' };
+    const kindLabel = { text: 'Text', image: 'Image', video: 'Video' };
     function kindFields(bag, setBag) {
+        const mediaKind = bag.kind === 'image' || bag.kind === 'video';
         async function attach(event) {
             const file = event.target.files && event.target.files[0];
             event.target.value = '';
@@ -3282,18 +3284,18 @@ function PushBoard() {
                 body.append('file', file);
                 const response = await fetch(apiPath('/api/v1/notifications/media'), { method: 'POST', headers, body });
                 const payload = await response.json();
-                if (!response.ok || payload.ok === false) throw new Error(payload.error || 'The video was not saved.');
-                setBag({ ...bag, kind: 'video', media: payload.data.media || '' });
+                if (!response.ok || payload.ok === false) throw new Error(payload.error || 'The file was not saved.');
+                setBag({ ...bag, kind: payload.data.kind || bag.kind, media: payload.data.media || '' });
             } catch (e) { setError(e.message); }
         }
         return html`<div class="fact-grid">
-            <label>Type<select value=${bag.kind || 'text'} onChange=${(event) => setBag({ ...bag, kind: event.target.value, media: event.target.value === 'video' ? (bag.media || '') : '' })}>
+            <label>Type<select value=${bag.kind === 'image' || bag.kind === 'video' ? bag.kind : 'text'} onChange=${(event) => setBag({ ...bag, kind: event.target.value, media: '' })}>
                 <option value="text">Text</option>
-                <option value="message">Message</option>
+                <option value="image">Image</option>
                 <option value="video">Video</option>
             </select></label>
-            ${(bag.kind || 'text') === 'video' ? html`<label>Video link<input value=${bag.media || ''} placeholder="https://..." onInput=${(event) => setBag({ ...bag, media: event.target.value })} /></label>
-            <label>Upload a video<input type="file" accept="video/mp4,video/webm,video/quicktime,.mp4,.webm,.mov" onChange=${attach} /></label>` : null}
+            ${mediaKind ? html`<label>${bag.kind === 'image' ? 'Image link' : 'Video link'}<input value=${bag.media || ''} placeholder="https://..." onInput=${(event) => setBag({ ...bag, media: event.target.value })} /></label>
+            <label>${bag.kind === 'image' ? 'Upload an image' : 'Upload a video'}<input type="file" accept=${bag.kind === 'image' ? 'image/png,image/jpeg,image/webp,image/gif,.png,.jpg,.jpeg,.webp,.gif' : 'video/mp4,video/webm,video/quicktime,.mp4,.webm,.mov'} onChange=${attach} /></label>` : null}
         </div>`;
     }
     async function saveRule(event) {
@@ -3343,10 +3345,10 @@ function PushBoard() {
                 <label>Name<input value=${form.name} onInput=${(event) => setForm({ ...form, name: event.target.value })} /></label>
                 <label>Event<select value=${form.event_key} onChange=${(event) => setForm({ ...form, event_key: event.target.value })}>${options.events.map((row) => html`<option key=${row.key} value=${row.key}>${row.module}: ${row.label}</option>`)}</select></label>
                 <label>Title<input value=${form.title} onInput=${(event) => setForm({ ...form, title: event.target.value })} /></label>
-                <label>Message<textarea value=${form.message} onInput=${(event) => setForm({ ...form, message: event.target.value })}></textarea></label>
+                <label>${form.kind === 'image' || form.kind === 'video' ? 'Caption' : 'Text'}<textarea value=${form.message} onInput=${(event) => setForm({ ...form, message: event.target.value })}></textarea></label>
             </div>
             ${kindFields(form, setForm)}
-            <p class="fine">Text and message are written. A video uses an https link or an MP4, WebM, or MOV up to 20 MB. Placeholders: {name} {lead} {task} {place} {actor}</p>
+            <p class="fine">Text is written. An image is a PNG, JPG, WebP, or GIF up to 8 MB, or an https link. A video is an MP4, WebM, or MOV up to 20 MB, or an https link. Their team is everyone on the event person's team. Particular teams send to everyone on each team you pick. Placeholders: {name} {lead} {task} {place} {actor}</p>
             ${boxes(form, setForm, true)}
             <div class="push-toggles"><label class=${form.active !== false ? 'on' : ''}><input type="checkbox" checked=${form.active !== false} onChange=${(event) => setForm({ ...form, active: event.target.checked })} /> Active</label></div>
             <div class="form-actions"><button class="primary" type="submit">Save</button><button class="ghost" type="button" onClick=${() => setForm(blank())}>Clear</button></div>
@@ -3361,7 +3363,7 @@ function PushBoard() {
             <h3>Announcement</h3>
             <div class="fact-grid">
                 <label>Title<input value=${announce.title} onInput=${(event) => setAnnounce({ ...announce, title: event.target.value })} /></label>
-                <label>Message<textarea value=${announce.message} onInput=${(event) => setAnnounce({ ...announce, message: event.target.value })}></textarea></label>
+                <label>${announce.kind === 'image' || announce.kind === 'video' ? 'Caption' : 'Text'}<textarea value=${announce.message} onInput=${(event) => setAnnounce({ ...announce, message: event.target.value })}></textarea></label>
             </div>
             ${kindFields(announce, setAnnounce)}
             ${boxes(announce, setAnnounce, false)}

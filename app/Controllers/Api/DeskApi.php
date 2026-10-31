@@ -1710,24 +1710,40 @@ class DeskApi extends BaseController
             $file = $this->request->getFile('file');
 
             if ($file === null || ! $file->isValid()) {
-                throw new RuntimeException('Choose a video file.');
+                throw new RuntimeException('Choose an image or a video.');
             }
 
             $head = (string) file_get_contents($file->getTempName(), false, null, 0, 12);
             $client = strtolower($file->getClientExtension() ?: '');
-            $webm = str_starts_with($head, "\x1A\x45\xDF\xA3");
-            $ftyp = strlen($head) >= 8 && substr($head, 4, 4) === 'ftyp';
+            $kind = '';
+            $ext = '';
 
-            if ($webm) {
+            if (str_starts_with($head, "\xFF\xD8\xFF")) {
+                $kind = 'image';
+                $ext = 'jpg';
+            } elseif (str_starts_with($head, "\x89PNG")) {
+                $kind = 'image';
+                $ext = 'png';
+            } elseif (str_starts_with($head, 'GIF8')) {
+                $kind = 'image';
+                $ext = 'gif';
+            } elseif (strlen($head) >= 12 && str_starts_with($head, 'RIFF') && substr($head, 8, 4) === 'WEBP') {
+                $kind = 'image';
+                $ext = 'webp';
+            } elseif (str_starts_with($head, "\x1A\x45\xDF\xA3")) {
+                $kind = 'video';
                 $ext = 'webm';
-            } elseif ($ftyp) {
+            } elseif (strlen($head) >= 8 && substr($head, 4, 4) === 'ftyp') {
+                $kind = 'video';
                 $ext = $client === 'mov' ? 'mov' : 'mp4';
             } else {
-                throw new RuntimeException('Use an MP4, WebM, or MOV video.');
+                throw new RuntimeException('Use a PNG, JPG, WebP, or GIF image, or an MP4, WebM, or MOV video.');
             }
 
-            if ((int) $file->getSize() < 1 || (int) $file->getSize() > 20 * 1024 * 1024) {
-                throw new RuntimeException('Use a video up to 20 MB.');
+            $limit = $kind === 'image' ? 8 * 1024 * 1024 : 20 * 1024 * 1024;
+
+            if ((int) $file->getSize() < 1 || (int) $file->getSize() > $limit) {
+                throw new RuntimeException($kind === 'image' ? 'Use an image up to 8 MB.' : 'Use a video up to 20 MB.');
             }
 
             $dir = WRITEPATH . 'uploads' . DIRECTORY_SEPARATOR . $this->tenant() . DIRECTORY_SEPARATOR . 'notices';
@@ -1739,23 +1755,27 @@ class DeskApi extends BaseController
             $stored = bin2hex(random_bytes(16)) . '.' . $ext;
             $file->move($dir, $stored, true);
 
-            return $this->ok(['media' => '/api/v1/notifications/media/' . $stored]);
+            return $this->ok(['media' => '/api/v1/notifications/media/' . $stored, 'kind' => $kind]);
         });
     }
 
     public function notificationMedia(string $name): ResponseInterface
     {
-        if (preg_match('/^[a-f0-9]{32}\.(mp4|webm|mov)$/', $name) !== 1) {
-            return $this->fail('That video is not available.', 404);
+        if (preg_match('/^[a-f0-9]{32}\.(jpg|png|webp|gif|mp4|webm|mov)$/', $name) !== 1) {
+            return $this->fail('That file is not available.', 404);
         }
 
         $path = WRITEPATH . 'uploads' . DIRECTORY_SEPARATOR . $this->tenant() . DIRECTORY_SEPARATOR . 'notices' . DIRECTORY_SEPARATOR . $name;
 
         if (! is_file($path)) {
-            return $this->fail('That video is not available.', 404);
+            return $this->fail('That file is not available.', 404);
         }
 
         $mime = match (strtolower(pathinfo($path, PATHINFO_EXTENSION))) {
+            'jpg'  => 'image/jpeg',
+            'png'  => 'image/png',
+            'webp' => 'image/webp',
+            'gif'  => 'image/gif',
             'webm' => 'video/webm',
             'mov'  => 'video/quicktime',
             default => 'video/mp4',
@@ -1763,7 +1783,7 @@ class DeskApi extends BaseController
         $size = filesize($path);
 
         if ($size === false || $size < 1) {
-            return $this->fail('That video is not available.', 404);
+            return $this->fail('That file is not available.', 404);
         }
 
         $start = 0;
@@ -1786,7 +1806,7 @@ class DeskApi extends BaseController
         $handle = fopen($path, 'rb');
 
         if ($handle === false) {
-            return $this->fail('That video is not available.', 404);
+            return $this->fail('That file is not available.', 404);
         }
 
         if ($start > 0) {

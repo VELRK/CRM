@@ -140,12 +140,12 @@ class PushService
             throw new RuntimeException('An announcement needs a title.');
         }
 
-        if ($piece['kind'] !== 'video' && $message === '') {
-            throw new RuntimeException('An announcement needs a message.');
+        if ($piece['kind'] === 'text' && $message === '') {
+            throw new RuntimeException('An announcement needs text.');
         }
 
         if ($message === '') {
-            $message = 'Open the video.';
+            $message = $piece['kind'] === 'image' ? 'Open the image.' : 'Open the video.';
         }
 
         $rule = [
@@ -183,8 +183,8 @@ class PushService
         foreach ($rows as &$row) {
             $payload = json_decode((string) ($row['payload_json'] ?? ''), true);
             $row['active'] = ($row['status'] ?? '') === 'active' && (int) ($row['is_enabled'] ?? 0) === 1;
-            $row['kind'] = is_array($payload) && in_array($payload['kind'] ?? '', ['text', 'video', 'message'], true) ? $payload['kind'] : 'text';
-            $row['media'] = $row['kind'] === 'video' && is_array($payload) ? (string) ($payload['media'] ?? '') : '';
+            $row['kind'] = is_array($payload) && in_array($payload['kind'] ?? '', ['text', 'image', 'video'], true) ? $payload['kind'] : 'text';
+            $row['media'] = in_array($row['kind'], ['image', 'video'], true) && is_array($payload) ? (string) ($payload['media'] ?? '') : '';
             $row['recipients'] = json_decode((string) ($row['recipient_config_json'] ?? ''), true) ?: $this->recipientBag([]);
             $row['conditions'] = json_decode((string) ($row['conditions_json'] ?? ''), true) ?: $this->conditions([]);
             unset($row['recipient_config_json'], $row['conditions_json'], $row['payload_json'], $row['is_enabled'], $row['status']);
@@ -219,12 +219,12 @@ class PushService
             throw new RuntimeException('Enter the title people will see.');
         }
 
-        if ($piece['kind'] !== 'video' && $message === '') {
-            throw new RuntimeException('Enter the message people will see.');
+        if ($piece['kind'] === 'text' && $message === '') {
+            throw new RuntimeException('Enter the text people will see.');
         }
 
         if ($message === '') {
-            $message = 'Open the video.';
+            $message = $piece['kind'] === 'image' ? 'Open the image.' : 'Open the video.';
         }
 
         $active = ! isset($input['active']) || ! empty($input['active']);
@@ -431,8 +431,8 @@ class PushService
         $title = $this->fill((string) ($rule['title'] ?? ''), $context);
         $message = $this->fill((string) ($rule['message'] ?? ''), $context);
         $payload = json_decode((string) ($rule['payload_json'] ?? ''), true);
-        $kind = is_array($payload) && in_array($payload['kind'] ?? '', ['text', 'video', 'message'], true) ? $payload['kind'] : 'text';
-        $media = $kind === 'video' ? (string) ($payload['media'] ?? '') : '';
+        $kind = is_array($payload) && in_array($payload['kind'] ?? '', ['text', 'image', 'video'], true) ? $payload['kind'] : 'text';
+        $media = in_array($kind, ['image', 'video'], true) ? (string) ($payload['media'] ?? '') : '';
         $now = date('Y-m-d H:i:s');
         $this->ensureMediaColumns();
         $this->db->table('notification_logs')->insert([
@@ -513,6 +513,19 @@ class PushService
 
         if (! empty($rules['subject']) && $subject > 0) {
             $ids[] = $subject;
+        }
+
+        if (! empty($rules['subject_team']) && $subject > 0) {
+            $teamId = (int) ($this->profile($tenantId, $subject)['team_id'] ?? 0);
+
+            if ($teamId > 0) {
+                $ids = array_merge($ids, $this->teamMembers($tenantId, [$teamId]));
+                $head = $this->teamHead($tenantId, $subject);
+
+                if ($head > 0) {
+                    $ids[] = $head;
+                }
+            }
         }
 
         if (! empty($rules['team_head']) && $subject > 0) {
@@ -813,23 +826,27 @@ class PushService
     {
         $kind = strtolower(trim((string) ($input['kind'] ?? $input['type'] ?? 'text')));
 
-        if (! in_array($kind, ['text', 'video', 'message'], true)) {
-            throw new RuntimeException('A notification can be text, video, or message.');
+        if (! in_array($kind, ['text', 'image', 'video'], true)) {
+            throw new RuntimeException('A notification can be text, image, or video.');
         }
 
-        if ($kind !== 'video') {
-            return ['kind' => $kind, 'media' => null];
+        if ($kind === 'text') {
+            return ['kind' => 'text', 'media' => null];
         }
 
-        $media = trim((string) ($input['media'] ?? $input['video'] ?? ''));
-        $local = preg_match('#^/api/v1/notifications/media/[a-f0-9]{32}\.(mp4|webm|mov)$#', $media) === 1;
+        $media = trim((string) ($input['media'] ?? ''));
+        $local = $kind === 'image'
+            ? preg_match('#^/api/v1/notifications/media/[a-f0-9]{32}\.(jpg|png|webp|gif)$#', $media) === 1
+            : preg_match('#^/api/v1/notifications/media/[a-f0-9]{32}\.(mp4|webm|mov)$#', $media) === 1;
         $remote = filter_var($media, FILTER_VALIDATE_URL) !== false && preg_match('#^https://#i', $media) === 1;
 
         if ($media === '' || strlen($media) > 500 || (! $local && ! $remote)) {
-            throw new RuntimeException('Add an https video link, or upload an MP4, WebM, or MOV file.');
+            throw new RuntimeException($kind === 'image'
+                ? 'Add an https image link, or upload a PNG, JPG, WebP, or GIF.'
+                : 'Add an https video link, or upload an MP4, WebM, or MOV file.');
         }
 
-        return ['kind' => 'video', 'media' => $media];
+        return ['kind' => $kind, 'media' => $media];
     }
 
     public function ensureMediaColumns(): void
@@ -1014,6 +1031,7 @@ class PushService
     {
         return [
             'subject'      => ! empty($input['subject']),
+            'subject_team' => ! empty($input['subject_team']),
             'team_head'    => ! empty($input['team_head']),
             'all_active'   => ! empty($input['all_active']),
             'users'        => $this->ints($input['users'] ?? []),
