@@ -53,7 +53,7 @@
         <?php endif; ?>
         <?php foreach ($messages ?? [] as $message) : ?>
             <tr>
-                <td><?= esc($message['created_at']) ?></td>
+                <td><?= esc($message['created_at'] ? date('d M Y, h:i A', strtotime((string) $message['created_at'])) : '—') ?></td>
                 <td><?= esc($message['lead_name'] ?: '—') ?></td>
                 <td><?= esc($message['to_phone'] ?: '—') ?></td>
                 <td><?= esc($message['kind_label'] ?? 'Lead message') ?></td>
