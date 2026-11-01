@@ -28,9 +28,15 @@
     <p class="lede">Messages go through AskEva. Leave the token blank to keep the one already saved. <?= ! empty($whatsapp['tokenSaved']) ? 'A token is saved.' : 'No token is saved yet.' ?></p>
     <label>Business number <input name="whatsapp_phone" value="<?= esc($whatsapp['phone'] ?? '') ?>"></label>
     <label>AskEva token <input name="whatsapp_token" type="password" placeholder="Leave blank to keep the saved token" autocomplete="off"></label>
+    <label>Welcome template <input name="whatsapp_welcome" value="<?= esc($whatsapp['welcome'] ?? '') ?>" placeholder="Exact AskEva template name, sent to the lead"></label>
+    <label>Lead assign template <input name="whatsapp_lead_assign" value="<?= esc($whatsapp['leadAssign'] ?? '') ?>" placeholder="Exact AskEva template name, sent to the new owner"></label>
+    <label>Follow-up assign template <input name="whatsapp_followup_assign" value="<?= esc($whatsapp['followupAssign'] ?? '') ?>" placeholder="Exact AskEva template name, sent to the assignee"></label>
     <label>Follow-up reminder template <input name="whatsapp_followup_reminder" value="<?= esc($whatsapp['followup'] ?? '') ?>" placeholder="Exact AskEva template name"></label>
+    <label>Visit assign template <input name="whatsapp_visit_assign" value="<?= esc($whatsapp['visitAssign'] ?? '') ?>" placeholder="Exact AskEva template name, sent to the assignee"></label>
     <label>Visit reminder template <input name="whatsapp_visit_reminder" value="<?= esc($whatsapp['visit'] ?? '') ?>" placeholder="Exact AskEva template name"></label>
+    <label>Task assign template <input name="whatsapp_task_assign" value="<?= esc($whatsapp['taskAssign'] ?? '') ?>" placeholder="Exact AskEva template name, sent to the assignee"></label>
     <label>Task reminder template <input name="whatsapp_task_reminder" value="<?= esc($whatsapp['task'] ?? '') ?>" placeholder="Exact AskEva template name"></label>
+    <label>Deal approval template <input name="whatsapp_deal_approve" value="<?= esc($whatsapp['dealApprove'] ?? '') ?>" placeholder="Exact AskEva template name, sent when a manager approves a deal"></label>
     <h2>Firebase</h2>
     <p class="lede">
         <?php if (($firebase['source'] ?? '') === 'company') : ?>

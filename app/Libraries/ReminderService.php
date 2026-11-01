@@ -76,7 +76,7 @@ class ReminderService
             $userId = (int) ($row['assigned_to'] ?: $row['user_id']);
             $when = $this->label((string) $row['call_scheduled_at']);
             $lead = (string) ($row['lead_name'] ?: 'a lead');
-            $this->notify($push, $tenantId, $userId, 'followup.reminder', 'Follow-up reminder', 'You have a follow-up with ' . $lead . ' at ' . $when, 'followup', (int) $row['id'], $lead, (string) ($row['call_subject'] ?? ''), $when);
+            $this->notify($push, $tenantId, $userId, 'followup.reminder', 'Follow-up reminder', 'You have a follow-up call scheduled with ' . $lead . ' at ' . $when, 'followup', (int) $row['id'], $lead, (string) ($row['call_subject'] ?? ''), $when);
             $this->whatsapp($tenantId, $token, $estate, $userId, (int) ($row['lead_id'] ?? 0), 'whatsapp_followup_reminder', 'Follow-up reminder', [
                 'clientname' => $lead, 'name' => $lead, 'number' => (string) ($row['lead_phone'] ?? ''), 'phone' => (string) ($row['lead_phone'] ?? ''),
                 'subject' => (string) ($row['call_subject'] ?? ''), 'scheduleddate' => $when, 'when' => $when, 'assignedby' => (string) ($row['assigned_by_name'] ?? ''),
@@ -117,7 +117,7 @@ class ReminderService
             $when = $this->label((string) $row['scheduled_at']);
             $lead = (string) ($row['lead_name'] ?: 'a lead');
             $project = (string) ($row['project_name'] ?: '');
-            $this->notify($push, $tenantId, $userId, 'visit.reminder', 'Visit reminder', 'You have a site visit with ' . $lead . ' at ' . $when, 'visit', (int) $row['id'], $lead, $project, $when);
+            $this->notify($push, $tenantId, $userId, 'visit.reminder', 'Visit reminder', 'You have a visit scheduled with ' . $lead . ' at ' . $when, 'visit', (int) $row['id'], $lead, $project, $when);
             $this->whatsapp($tenantId, $token, $estate, $userId, (int) ($row['lead_id'] ?? 0), 'whatsapp_visit_reminder', 'Visit reminder', [
                 'clientname' => $lead, 'name' => $lead, 'number' => (string) ($row['lead_phone'] ?? ''), 'phone' => (string) ($row['lead_phone'] ?? ''),
                 'visitproject' => $project, 'project' => $project, 'scheduleddate' => $when, 'when' => $when, 'assignedby' => (string) ($row['assigned_by_name'] ?? ''),
@@ -157,7 +157,7 @@ class ReminderService
             $when = $this->label((string) $row['scheduled_at']);
             $lead = (string) ($row['lead_name'] ?: '');
             $subject = (string) ($row['subject'] ?: 'Task');
-            $this->notify($push, $tenantId, $userId, 'task.reminder', 'Task reminder', $subject . ' is due at ' . $when, 'task', (int) $row['id'], $lead, $subject, $when);
+            $this->notify($push, $tenantId, $userId, 'task.reminder', 'Task reminder', 'You have a pending task due at ' . $when, 'task', (int) $row['id'], $lead, $subject, $when);
             $this->whatsapp($tenantId, $token, $estate, $userId, (int) ($row['lead_id'] ?? 0), 'whatsapp_task_reminder', 'Task reminder', [
                 'clientname' => $lead !== '' ? $lead : '-', 'name' => $lead !== '' ? $lead : '-', 'subject' => $subject,
                 'scheduleddate' => $when, 'when' => $when, 'assignedby' => (string) ($row['assigned_by_name'] ?? ''),
@@ -234,40 +234,13 @@ class ReminderService
         }
 
         $phone = $this->staffPhone($tenantId, $userId);
-
-        if ($phone === '') {
-            return;
-        }
-
-        $template = $this->db->table('whatsapp_templates')
-            ->where('tenant_id', $tenantId)
-            ->where('name', $name)
-            ->where('deleted_at', null)
-            ->get()
-            ->getRowArray();
-        $language = (string) ($template['language'] ?? 'en');
-        $body = (string) ($template['body'] ?? '');
-        $values = $this->askeva->values($body, $known, $fallback);
-        $result = $this->askeva->sendTemplate($token, $phone, $name, $language, $values);
-        $rendered = $body !== '' ? strtr($body, $this->braces($known)) : $subject;
         $kind = match ($setting) {
             'whatsapp_followup_reminder' => 'followup.reminder',
             'whatsapp_visit_reminder'    => 'visit.reminder',
             'whatsapp_task_reminder'     => 'task.reminder',
             default                      => 'lead',
         };
-        $estate->logWhatsapp(
-            $tenantId,
-            $leadId,
-            $userId,
-            $template === null ? 0 : (int) $template['id'],
-            $phone,
-            $subject,
-            $rendered,
-            $result['ok'] ? 'sent' : 'failed',
-            $result['ok'] ? 'Sent through AskEva.' : $result['error'],
-            $kind,
-        );
+        $estate->sendConfiguredWhatsapp($tenantId, $userId, $leadId, $setting, $subject, $phone, $known, $fallback, $kind);
     }
 
     /**

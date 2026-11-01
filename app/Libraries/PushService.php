@@ -22,6 +22,7 @@ class PushService
         'visit.reminder'     => ['module' => 'Visits', 'label' => 'Site visit reminder'],
         'task.reminder'      => ['module' => 'Tasks', 'label' => 'Task reminder'],
         'attendance.marked'  => ['module' => 'Attendance', 'label' => 'Attendance marked'],
+        'deal.approved'      => ['module' => 'Pipeline', 'label' => 'Deal approved by the manager'],
         'manual'             => ['module' => 'Announcement', 'label' => 'Announcement'],
     ];
 

@@ -123,6 +123,9 @@
             'count' => (int) $row['total'],
         ];
     }
+    $see = static function (string $key) use ($can): bool {
+        return in_array('reports.view', $can, true) || in_array($key, $can, true);
+    };
 ?>
 <header class="page-head">
     <div>
@@ -135,24 +138,33 @@
     <?php endif; ?>
 </header>
 <section class="kpis">
+    <?php if ($see('leads.view')) : ?>
     <article>
         <span class="well"><?= icon('contact') ?></span>
         <div><strong><?= (int) $board['leads'] ?></strong><span>Leads</span><em><?= (int) $intakeTotal ?> in 14 days</em></div>
     </article>
+    <?php endif; ?>
+    <?php if ($see('followups.view')) : ?>
     <article>
         <span class="well"><?= icon('clipboard-list') ?></span>
         <div><strong><?= (int) $board['followups'] ?></strong><span>Open follow-ups</span><em><?= (int) $split['overdue'] ?> overdue</em></div>
     </article>
+    <?php endif; ?>
+    <?php if ($see('visits.view')) : ?>
     <article>
         <span class="well"><?= icon('map-pin') ?></span>
         <div><strong><?= (int) $board['visits'] ?></strong><span>Visits scheduled</span><em><?= (int) $visitDone ?> completed</em></div>
     </article>
+    <?php endif; ?>
+    <?php if ($see('plots.view')) : ?>
     <article>
         <span class="well"><?= icon('map') ?></span>
         <div><strong><?= (int) $board['available'] ?></strong><span>Plots available</span><em><?= (int) $bookedPlots ?> booked or sold</em></div>
     </article>
+    <?php endif; ?>
 </section>
 <section class="chart-grid">
+    <?php if ($see('leads.view')) : ?>
     <article class="panel chart-card chart-wide">
         <header class="chart-head">
             <div><h2>Lead intake</h2><p>New leads on each of the last 14 days</p></div>
@@ -178,10 +190,14 @@
             <?php endforeach; ?>
         </svg>
     </article>
+    <?php endif; ?>
+    <?php if ($see('leads.view')) : ?>
     <article class="panel chart-card">
         <header class="chart-head"><div><h2>Lead pipeline</h2><p>Where current leads sit</p></div></header>
         <?= $meters($board['statuses'], 'label', 'total') ?>
     </article>
+    <?php endif; ?>
+    <?php if ($see('plots.view')) : ?>
     <article class="panel chart-card">
         <header class="chart-head"><div><h2>Plot inventory</h2><p><?= (int) $plotTotal ?> plots across projects</p></div></header>
         <?php if ($plotTotal < 1) : ?>
@@ -193,6 +209,8 @@
             </div>
         <?php endif; ?>
     </article>
+    <?php endif; ?>
+    <?php if ($see('leads.view')) : ?>
     <article class="panel chart-card">
         <header class="chart-head"><div><h2>Conversion</h2><p>Lead, then visit, then booking</p></div></header>
         <div class="steps">
@@ -206,6 +224,8 @@
             <?php endforeach; ?>
         </div>
     </article>
+    <?php endif; ?>
+    <?php if ($see('followups.view')) : ?>
     <article class="panel chart-card">
         <header class="chart-head"><div><h2>Follow-up pace</h2><p>Done against what is still open</p></div></header>
         <?php if (array_sum(array_column($followRows, 'total')) < 1) : ?>
@@ -217,22 +237,32 @@
             </div>
         <?php endif; ?>
     </article>
+    <?php endif; ?>
+    <?php if ($see('leads.view')) : ?>
     <article class="panel chart-card">
         <header class="chart-head"><div><h2>Lead sources</h2><p>How people first arrived</p></div></header>
         <?= $meters($board['sources'], 'label', 'total') ?>
     </article>
+    <?php endif; ?>
+    <?php if ($see('visits.view')) : ?>
     <article class="panel chart-card">
         <header class="chart-head"><div><h2>Site visits</h2><p>Scheduled through to no-show</p></div></header>
         <?= $meters($visitRows, 'label', 'total') ?>
     </article>
+    <?php endif; ?>
+    <?php if ($see('leads.view')) : ?>
     <article class="panel chart-card">
         <header class="chart-head"><div><h2>Advisors</h2><p>Open lead load by owner</p></div></header>
         <?= $meters($board['owners'], 'name', 'total') ?>
     </article>
+    <?php endif; ?>
+    <?php if ($see('incentives.view')) : ?>
     <article class="panel chart-card">
         <header class="chart-head"><div><h2>Incentives</h2><p>Amount waiting in each state</p></div></header>
         <?= $meters($incentiveRows, 'label', 'total', static fn (array $row): string => \App\Libraries\DeskService::money((int) $row['total'], 'INR')) ?>
     </article>
+    <?php endif; ?>
+    <?php if ($see('attendance.view')) : ?>
     <article class="panel chart-card">
         <header class="chart-head"><div><h2>Attendance</h2><p>Marks recorded this month</p></div></header>
         <?php if ($attendanceRows === []) : ?>
@@ -244,6 +274,8 @@
             </div>
         <?php endif; ?>
     </article>
+    <?php endif; ?>
+    <?php if ($see('followups.view')) : ?>
     <article class="panel chart-card">
         <header class="chart-head"><div><h2>Due follow-ups</h2><p>Due today or already late</p></div></header>
         <?php if ($board['due'] === []) : ?>
@@ -262,5 +294,6 @@
             </div>
         <?php endif; ?>
     </article>
+    <?php endif; ?>
 </section>
 <?= $this->endSection() ?>

@@ -413,6 +413,7 @@ class EstateService
             $this->grantRoleKeys($tenantId, ['Admin'], ['masters.view', 'masters.manage', 'leads.approve', 'deals.approve']);
             $this->grantRoleKeys($tenantId, ['Manager', 'Team Head'], ['leads.approve', 'deals.approve', 'deals.view', 'masters.view']);
             $this->ensureNamedRole($tenantId, 'Collaborator', AccessCatalog::forStarter('Collaborator'));
+            $this->alignTaskAccess($tenantId);
         }
     }
 
@@ -473,6 +474,58 @@ class EstateService
     /**
      * @param list<string> $keys
      */
+    /**
+     * Roles that already log follow-ups keep the Tasks screen after Tasks uses its own permission.
+     * Runs once. Later removals of tasks.view stay removed.
+     */
+    private function alignTaskAccess(int $tenantId): void
+    {
+        if (! $this->db->tableExists('tenant_settings') || ! $this->db->tableExists('role_permissions')) {
+            return;
+        }
+
+        $flag = $this->db->table('tenant_settings')
+            ->where('tenant_id', $tenantId)
+            ->where('setting_key', 'task_access_aligned')
+            ->countAllResults();
+
+        if ($flag > 0) {
+            return;
+        }
+
+        $roles = $this->db->table('roles')
+            ->select('id')
+            ->where('tenant_id', $tenantId)
+            ->where('deleted_at', null)
+            ->get()
+            ->getResultArray();
+
+        foreach ($roles as $role) {
+            $held = array_column(
+                $this->db->table('role_permissions')->select('permission_key')->where('role_id', (int) $role['id'])->get()->getResultArray(),
+                'permission_key'
+            );
+            $grant = [];
+
+            if (in_array('followups.view', $held, true)) {
+                $grant[] = 'tasks.view';
+            }
+
+            if (in_array('followups.create', $held, true)) {
+                $grant[] = 'tasks.create';
+                $grant[] = 'tasks.update';
+            }
+
+            $this->grantKeys((int) $role['id'], $grant);
+        }
+
+        $this->db->table('tenant_settings')->insert([
+            'tenant_id'     => $tenantId,
+            'setting_key'   => 'task_access_aligned',
+            'setting_value' => '1',
+        ]);
+    }
+
     private function grantKeys(int $roleId, array $keys): void
     {
         if ($roleId < 1 || ! $this->db->tableExists('role_permissions')) {
@@ -1209,6 +1262,208 @@ class EstateService
     }
 
     /**
+     * AskEva send for one saved template name. A blank token, template name, or phone skips the send.
+     *
+     * @param array<string, string> $known
+     * @param list<string> $fallback
+     */
+    public function sendConfiguredWhatsapp(int $tenantId, int $actorId, int $leadId, string $settingKey, string $subject, string $phone, array $known, array $fallback, string $kind): void
+    {
+        $token = trim((string) ($this->setting($tenantId, 'whatsapp_token') ?? ''));
+        $name = trim((string) ($this->setting($tenantId, $settingKey) ?? ''));
+        $phone = trim($phone);
+
+        if ($token === '' || $name === '' || $phone === '') {
+            return;
+        }
+
+        try {
+            $template = $this->db->tableExists('whatsapp_templates')
+                ? $this->db->table('whatsapp_templates')->where('tenant_id', $tenantId)->where('name', $name)->where('deleted_at', null)->get()->getRowArray()
+                : null;
+            $body = (string) ($template['body'] ?? '');
+            $askeva = new AskEva();
+            $values = $askeva->values($body, $known, $fallback);
+            $result = $askeva->sendTemplate($token, $phone, $name, (string) ($template['language'] ?? 'en'), $values);
+            $rendered = $body !== '' ? strtr($body, $this->braces($known)) : $subject;
+            $this->logWhatsapp(
+                $tenantId,
+                $leadId,
+                $actorId,
+                $template === null ? 0 : (int) $template['id'],
+                $phone,
+                $subject,
+                $rendered,
+                $result['ok'] ? 'sent' : 'failed',
+                $result['ok'] ? 'Sent through AskEva.' : $result['error'],
+                $kind,
+            );
+        } catch (\Throwable $e) {
+            log_message('error', 'AskEva send failed: ' . $e->getMessage());
+        }
+    }
+
+    public function notifyWelcome(int $tenantId, int $actorId, int $leadId): void
+    {
+        $lead = (new SiteService($this->db))->lead($tenantId, $leadId);
+
+        if ($lead === null) {
+            return;
+        }
+
+        $name = (string) ($lead['name'] ?? '');
+        $phone = (string) (($lead['phone_number'] ?? '') !== '' ? $lead['phone_number'] : ($lead['phone'] ?? ''));
+        $project = (string) ($lead['project_name'] ?? '');
+        $source = (string) ($lead['source'] ?? '');
+        $this->sendConfiguredWhatsapp($tenantId, $actorId, $leadId, 'whatsapp_welcome', 'Welcome', $phone, [
+            'clientname' => $name, 'name' => $name, 'number' => $phone, 'phone' => $phone,
+            'project' => $project, 'projectenquired' => $project, 'leadsource' => $source,
+        ], ['clientname', 'project', 'leadsource'], 'welcome');
+    }
+
+    public function notifyLeadAssign(int $tenantId, int $actorId, int $leadId): void
+    {
+        $lead = (new SiteService($this->db))->lead($tenantId, $leadId);
+
+        if ($lead === null) {
+            return;
+        }
+
+        $ownerId = (int) ($lead['owner_id'] ?? 0);
+        $this->notifyLeadAssignTo($tenantId, $actorId, $lead, $ownerId);
+    }
+
+    /**
+     * @param array<string, mixed> $lead
+     */
+    public function notifyLeadAssignTo(int $tenantId, int $actorId, array $lead, int $userId): void
+    {
+        if ($userId < 1 || $userId === $actorId) {
+            return;
+        }
+
+        $leadId = (int) ($lead['id'] ?? 0);
+        $name = (string) ($lead['name'] ?? '');
+        $phone = (string) (($lead['phone_number'] ?? '') !== '' ? $lead['phone_number'] : ($lead['phone'] ?? ''));
+        $project = (string) ($lead['project_name'] ?? '');
+        $this->sendConfiguredWhatsapp($tenantId, $actorId, $leadId, 'whatsapp_lead_assign', 'Lead assign', $this->staffPhone($tenantId, $userId), [
+            'clientname' => $name, 'name' => $name, 'number' => $phone, 'phone' => $phone,
+            'assignedby' => $this->userName($actorId), 'projectenquired' => $project, 'project' => $project,
+            'leadsource' => (string) ($lead['source'] ?? ''),
+        ], ['clientname', 'number', 'assignedby', 'projectenquired', 'leadsource'], 'lead.assign');
+    }
+
+    public function notifyFollowupAssign(int $tenantId, int $actorId, int $leadId, int $assigneeId, string $subject, string $when): void
+    {
+        if ($assigneeId < 1 || $assigneeId === $actorId) {
+            return;
+        }
+
+        $lead = (new SiteService($this->db))->lead($tenantId, $leadId);
+        $name = is_array($lead) ? (string) ($lead['name'] ?? '') : '';
+        $phone = is_array($lead) ? (string) (($lead['phone_number'] ?? '') !== '' ? $lead['phone_number'] : ($lead['phone'] ?? '')) : '';
+        $when = $this->clockLabel($when);
+        $this->sendConfiguredWhatsapp($tenantId, $actorId, $leadId, 'whatsapp_followup_assign', 'Follow-up assign', $this->staffPhone($tenantId, $assigneeId), [
+            'clientname' => $name, 'name' => $name, 'number' => $phone, 'phone' => $phone,
+            'subject' => $subject, 'scheduleddate' => $when, 'when' => $when, 'assignedby' => $this->userName($actorId),
+        ], ['clientname', 'number', 'subject', 'scheduleddate', 'assignedby'], 'followup.assign');
+    }
+
+    public function notifyVisitAssign(int $tenantId, int $actorId, int $leadId, int $assigneeId, string $project, string $when): void
+    {
+        if ($assigneeId < 1 || $assigneeId === $actorId) {
+            return;
+        }
+
+        $lead = (new SiteService($this->db))->lead($tenantId, $leadId);
+        $name = is_array($lead) ? (string) ($lead['name'] ?? '') : '';
+        $phone = is_array($lead) ? (string) (($lead['phone_number'] ?? '') !== '' ? $lead['phone_number'] : ($lead['phone'] ?? '')) : '';
+        $when = $this->clockLabel($when);
+        $this->sendConfiguredWhatsapp($tenantId, $actorId, $leadId, 'whatsapp_visit_assign', 'Visit assign', $this->staffPhone($tenantId, $assigneeId), [
+            'clientname' => $name, 'name' => $name, 'number' => $phone, 'phone' => $phone,
+            'visitproject' => $project, 'project' => $project, 'visitscheduleddate' => $when, 'scheduleddate' => $when, 'when' => $when,
+            'assignedby' => $this->userName($actorId),
+        ], ['clientname', 'number', 'visitproject', 'visitscheduleddate', 'assignedby'], 'visit.assign');
+    }
+
+    public function notifyTaskAssign(int $tenantId, int $actorId, int $leadId, int $assigneeId, string $subject, string $when): void
+    {
+        if ($assigneeId < 1 || $assigneeId === $actorId) {
+            return;
+        }
+
+        $lead = $leadId > 0 ? (new SiteService($this->db))->lead($tenantId, $leadId) : null;
+        $name = is_array($lead) ? (string) ($lead['name'] ?? '') : '';
+        $when = $this->clockLabel($when);
+        $this->sendConfiguredWhatsapp($tenantId, $actorId, $leadId, 'whatsapp_task_assign', 'Task assign', $this->staffPhone($tenantId, $assigneeId), [
+            'clientname' => $name, 'name' => $name, 'subject' => $subject, 'scheduleddate' => $when, 'when' => $when,
+            'assignedby' => $this->userName($actorId),
+        ], ['clientname', 'subject', 'scheduleddate', 'assignedby'], 'task.assign');
+    }
+
+    public function notifyDealApproved(int $tenantId, int $actorId, int $leadId, int $userId, string $leadName, string $project, string $plot): void
+    {
+        if ($userId < 1 || $userId === $actorId) {
+            return;
+        }
+
+        $this->sendConfiguredWhatsapp($tenantId, $actorId, $leadId, 'whatsapp_deal_approve', 'Deal approved', $this->staffPhone($tenantId, $userId), [
+            'clientname' => $leadName, 'name' => $leadName, 'project' => $project, 'plot' => $plot,
+            'assignedby' => $this->userName($actorId),
+        ], ['clientname', 'project', 'plot', 'assignedby'], 'deal.approve');
+    }
+
+    /**
+     * @param array<string, string> $known
+     * @return array<string, string>
+     */
+    private function braces(array $known): array
+    {
+        $map = [];
+
+        foreach ($known as $key => $value) {
+            $map['{{' . $key . '}}'] = $value;
+        }
+
+        return $map;
+    }
+
+    private function staffPhone(int $tenantId, int $userId): string
+    {
+        if ($userId < 1 || ! $this->db->tableExists('staff_profiles')) {
+            return '';
+        }
+
+        $row = $this->db->table('staff_profiles')
+            ->select('phone_number, phone')
+            ->where('tenant_id', $tenantId)
+            ->where('user_id', $userId)
+            ->where('deleted_at', null)
+            ->get()
+            ->getRowArray();
+
+        return trim((string) (($row['phone_number'] ?? '') !== '' ? $row['phone_number'] : ($row['phone'] ?? '')));
+    }
+
+    private function userName(int $userId): string
+    {
+        if ($userId < 1) {
+            return '';
+        }
+
+        $row = $this->db->table('users')->select('name')->where('id', $userId)->get()->getRowArray();
+
+        return trim((string) ($row['name'] ?? ''));
+    }
+
+    private function clockLabel(string $value): string
+    {
+        $stamp = strtotime($value);
+
+        return $stamp === false ? $value : date('d M Y, h:i A', $stamp);
+    }
+
+    /**
      * @param array<string, string> $filters
      * @return list<array<string, mixed>>
      */
@@ -1240,9 +1495,15 @@ class EstateService
 
             $row['kind'] = (string) ($row['kind'] ?: 'lead');
             $row['kind_label'] = match ($row['kind']) {
+                'welcome'           => 'Welcome',
+                'lead.assign'       => 'Lead assign',
+                'followup.assign'   => 'Follow-up assign',
                 'followup.reminder' => 'Follow-up reminder',
+                'visit.assign'      => 'Visit assign',
                 'visit.reminder'    => 'Visit reminder',
+                'task.assign'       => 'Task assign',
                 'task.reminder'     => 'Task reminder',
+                'deal.approve'      => 'Deal approved',
                 default             => 'Lead message',
             };
             $row['detail'] = (string) ($row['detail'] ?? '');
@@ -1415,16 +1676,22 @@ class EstateService
     }
 
     /**
-     * @return array{phone: string, tokenSaved: bool, followup: string, visit: string, task: string}
+     * @return array{phone: string, tokenSaved: bool, welcome: string, leadAssign: string, followupAssign: string, followup: string, visitAssign: string, visit: string, taskAssign: string, task: string}
      */
     public function whatsappSettings(int $tenantId): array
     {
         return [
-            'phone'      => (string) ($this->setting($tenantId, 'whatsapp_phone') ?? ''),
-            'tokenSaved' => trim((string) ($this->setting($tenantId, 'whatsapp_token') ?? '')) !== '',
-            'followup'   => (string) ($this->setting($tenantId, 'whatsapp_followup_reminder') ?? ''),
-            'visit'      => (string) ($this->setting($tenantId, 'whatsapp_visit_reminder') ?? ''),
-            'task'       => (string) ($this->setting($tenantId, 'whatsapp_task_reminder') ?? ''),
+            'phone'          => (string) ($this->setting($tenantId, 'whatsapp_phone') ?? ''),
+            'tokenSaved'     => trim((string) ($this->setting($tenantId, 'whatsapp_token') ?? '')) !== '',
+            'welcome'        => (string) ($this->setting($tenantId, 'whatsapp_welcome') ?? ''),
+            'leadAssign'     => (string) ($this->setting($tenantId, 'whatsapp_lead_assign') ?? ''),
+            'followupAssign' => (string) ($this->setting($tenantId, 'whatsapp_followup_assign') ?? ''),
+            'followup'       => (string) ($this->setting($tenantId, 'whatsapp_followup_reminder') ?? ''),
+            'visitAssign'    => (string) ($this->setting($tenantId, 'whatsapp_visit_assign') ?? ''),
+            'visit'          => (string) ($this->setting($tenantId, 'whatsapp_visit_reminder') ?? ''),
+            'taskAssign'     => (string) ($this->setting($tenantId, 'whatsapp_task_assign') ?? ''),
+            'task'           => (string) ($this->setting($tenantId, 'whatsapp_task_reminder') ?? ''),
+            'dealApprove'    => (string) ($this->setting($tenantId, 'whatsapp_deal_approve') ?? ''),
         ];
     }
 
@@ -1434,9 +1701,15 @@ class EstateService
     public function saveWhatsappSettings(int $tenantId, array $input): void
     {
         $this->saveNamed($tenantId, $input, ['whatsappPhone', 'whatsapp_phone'], 'whatsapp_phone', 20, 'The WhatsApp number is too long.');
+        $this->saveNamed($tenantId, $input, ['whatsappWelcome', 'whatsapp_welcome'], 'whatsapp_welcome', 80, 'Welcome template name is too long.');
+        $this->saveNamed($tenantId, $input, ['whatsappLeadAssign', 'whatsapp_lead_assign'], 'whatsapp_lead_assign', 80, 'Lead assign template name is too long.');
+        $this->saveNamed($tenantId, $input, ['whatsappFollowupAssign', 'whatsapp_followup_assign'], 'whatsapp_followup_assign', 80, 'Follow-up assign template name is too long.');
         $this->saveNamed($tenantId, $input, ['whatsappFollowup', 'whatsapp_followup_reminder'], 'whatsapp_followup_reminder', 80, 'Follow-up reminder template name is too long.');
+        $this->saveNamed($tenantId, $input, ['whatsappVisitAssign', 'whatsapp_visit_assign'], 'whatsapp_visit_assign', 80, 'Visit assign template name is too long.');
         $this->saveNamed($tenantId, $input, ['whatsappVisit', 'whatsapp_visit_reminder'], 'whatsapp_visit_reminder', 80, 'Visit reminder template name is too long.');
+        $this->saveNamed($tenantId, $input, ['whatsappTaskAssign', 'whatsapp_task_assign'], 'whatsapp_task_assign', 80, 'Task assign template name is too long.');
         $this->saveNamed($tenantId, $input, ['whatsappTask', 'whatsapp_task_reminder'], 'whatsapp_task_reminder', 80, 'Task reminder template name is too long.');
+        $this->saveNamed($tenantId, $input, ['whatsappDealApprove', 'whatsapp_deal_approve'], 'whatsapp_deal_approve', 80, 'Deal approval template name is too long.');
 
         foreach (['whatsappToken', 'whatsapp_token'] as $key) {
             if (! array_key_exists($key, $input)) {

@@ -15,9 +15,15 @@
     <?= csrf_field() ?>
     <label>Business number <input name="whatsapp_phone" value="<?= esc($phone) ?>"></label>
     <label>AskEva token <input name="whatsapp_token" type="password" placeholder="Leave blank to keep the saved token"></label>
+    <label>Welcome template <input name="whatsapp_welcome" value="<?= esc($welcome ?? '') ?>" placeholder="Exact AskEva template name, sent to the lead"></label>
+    <label>Lead assign template <input name="whatsapp_lead_assign" value="<?= esc($leadAssign ?? '') ?>" placeholder="Exact AskEva template name, sent to the new owner"></label>
+    <label>Follow-up assign template <input name="whatsapp_followup_assign" value="<?= esc($followupAssign ?? '') ?>" placeholder="Exact AskEva template name, sent to the assignee"></label>
     <label>Follow-up reminder template <input name="whatsapp_followup_reminder" value="<?= esc($followupReminder ?? '') ?>" placeholder="Exact AskEva template name"></label>
+    <label>Visit assign template <input name="whatsapp_visit_assign" value="<?= esc($visitAssign ?? '') ?>" placeholder="Exact AskEva template name, sent to the assignee"></label>
     <label>Visit reminder template <input name="whatsapp_visit_reminder" value="<?= esc($visitReminder ?? '') ?>" placeholder="Exact AskEva template name"></label>
+    <label>Task assign template <input name="whatsapp_task_assign" value="<?= esc($taskAssign ?? '') ?>" placeholder="Exact AskEva template name, sent to the assignee"></label>
     <label>Task reminder template <input name="whatsapp_task_reminder" value="<?= esc($taskReminder ?? '') ?>" placeholder="Exact AskEva template name"></label>
+    <label>Deal approval template <input name="whatsapp_deal_approve" value="<?= esc($dealApprove ?? '') ?>" placeholder="Exact AskEva template name, sent when a manager approves a deal"></label>
     <button class="ghost" type="submit">Save connection</button>
 </form>
 <?php endif; ?>
@@ -34,7 +40,7 @@
     <label>Kind
         <select name="kind">
             <option value="">All</option>
-            <?php foreach (['lead' => 'Lead message', 'followup.reminder' => 'Follow-up reminder', 'visit.reminder' => 'Visit reminder', 'task.reminder' => 'Task reminder'] as $value => $label) : ?>
+            <?php foreach (['lead' => 'Lead message', 'welcome' => 'Welcome', 'lead.assign' => 'Lead assign', 'followup.assign' => 'Follow-up assign', 'followup.reminder' => 'Follow-up reminder', 'visit.assign' => 'Visit assign', 'visit.reminder' => 'Visit reminder', 'task.assign' => 'Task assign', 'task.reminder' => 'Task reminder', 'deal.approve' => 'Deal approved'] as $value => $label) : ?>
                 <option value="<?= esc($value) ?>" <?= ($filters['kind'] ?? '') === $value ? 'selected' : '' ?>><?= esc($label) ?></option>
             <?php endforeach; ?>
         </select>

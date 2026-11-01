@@ -293,7 +293,7 @@ class DeskApi extends BaseController
         $owner = $this->companyOwner();
         $area = $this->estate->attendanceArea($this->tenant());
 
-        return [
+        $row = [
             'companyName'       => (string) ($tenant['name'] ?? ''),
             'companyAdminName'  => (string) ($owner['name'] ?? ''),
             'companyAdminEmail' => (string) ($owner['email'] ?? ''),
@@ -304,9 +304,14 @@ class DeskApi extends BaseController
             'attendanceLat'     => $area['lat'],
             'attendanceLng'     => $area['lng'],
             'attendanceKm'      => $area['km'] === '0' ? '' : $area['km'],
-            'whatsapp'          => $this->estate->whatsappSettings($this->tenant()),
-            'firebase'          => $this->alerts()->firebaseStatus($this->tenant()),
         ];
+
+        if ($this->allows('workspace.settings')) {
+            $row['whatsapp'] = $this->estate->whatsappSettings($this->tenant());
+            $row['firebase'] = $this->alerts()->firebaseStatus($this->tenant());
+        }
+
+        return $row;
     }
 
     private bool $companyColumnsReady = false;
@@ -394,6 +399,10 @@ class DeskApi extends BaseController
 
     public function catalog(): ResponseInterface
     {
+        if ($denied = $this->guard('workspace.settings')) {
+            return $denied;
+        }
+
         return $this->ok([
             'base'    => rtrim(base_url(), '/'),
             'note'    => 'Sign in with POST /api/v1/auth/login, then send Authorization: Bearer and that token on every other call, including GET. The workspace comes from the token. Do not send companyId. Automatic lead assignment is not in this API. WhatsApp messages go out through AskEva and stay in the sent report.',
@@ -403,6 +412,10 @@ class DeskApi extends BaseController
 
     public function postman(): ResponseInterface
     {
+        if ($denied = $this->guard('workspace.settings')) {
+            return $denied;
+        }
+
         return $this->response
             ->setHeader('Content-Disposition', 'attachment; filename="atrium-api.postman_collection.json"')
             ->setJSON(ApiCatalog::postman(rtrim(base_url(), '/')));
@@ -1020,6 +1033,7 @@ class DeskApi extends BaseController
             $input = $this->input();
             $input['by_user_id'] = $this->user();
             unset($input['may_assign'], $input['approval_status'], $input['approved_by']);
+            $before = $id === null ? null : $this->sites->lead($this->tenant(), $id);
 
             if ($this->allows('leads.approve')) {
                 $input['may_assign'] = 1;
@@ -1037,7 +1051,15 @@ class DeskApi extends BaseController
 
             $this->desk->audit($this->tenant(), $this->user(), $this->plan(), $id === null ? 'lead.create' : 'lead.update', 'lead', $saved, (string) ($input['status'] ?? ''));
 
+            $after = $this->sites->lead($this->tenant(), $saved);
+            $approved = ($after['approval_status'] ?? '') === 'approved';
+            $wasApproved = $before !== null && (string) ($before['approval_status'] ?? '') === 'approved';
+
             if ($id === null) {
+                $this->estate->notifyWelcome($this->tenant(), $this->user(), $saved);
+            }
+
+            if ($approved && ! $wasApproved) {
                 $this->alertLead($saved);
             }
 
@@ -1186,7 +1208,12 @@ class DeskApi extends BaseController
         }
 
         return $this->run(function () use ($id) {
+            $before = $this->sites->lead($this->tenant(), $id);
             $this->sites->approveLead($this->tenant(), $id, $this->user());
+
+            if ($before !== null && (string) ($before['approval_status'] ?? '') !== 'approved') {
+                $this->alertLead($id);
+            }
 
             return $this->ok($this->sites->lead($this->tenant(), $id));
         });
@@ -1217,8 +1244,27 @@ class DeskApi extends BaseController
             return $blocked;
         }
 
-        return $this->run(function () use ($id) {
-            return $this->ok($this->sites->approveDeal($this->tenant(), $id, $this->user()));
+        return $this->run(function () use ($id, $deal) {
+            $approved = $this->sites->approveDeal($this->tenant(), $id, $this->user());
+
+            if ((string) ($deal['approval_status'] ?? '') !== 'approved') {
+                $personId = (int) ($approved['inserted_by'] ?? 0);
+                $leadName = (string) ($approved['lead_name'] ?? '');
+
+                if ($personId < 1) {
+                    $leadRow = $this->sites->lead($this->tenant(), (int) ($approved['lead_id'] ?? 0));
+                    $personId = (int) ($leadRow['owner_id'] ?? 0);
+                }
+                $this->alert('deal.approved', [
+                    'subject_user_id' => $personId,
+                    'subject_type'    => 'deal',
+                    'subject_id'      => $id,
+                    'lead'            => $leadName,
+                ]);
+                $this->estate->notifyDealApproved($this->tenant(), $this->user(), (int) ($approved['lead_id'] ?? 0), $personId, $leadName, (string) ($approved['project_name'] ?? ''), (string) ($approved['plot_label'] ?? ''));
+            }
+
+            return $this->ok($approved);
         });
     }
 
@@ -1362,6 +1408,14 @@ class DeskApi extends BaseController
                 'lead'            => (string) ($this->sites->lead($this->tenant(), $leadId)['name'] ?? ''),
                 'name'            => $this->personName($assigned),
             ]);
+            $this->estate->notifyFollowupAssign(
+                $this->tenant(),
+                $this->user(),
+                $leadId,
+                $assigned,
+                (string) ($input['callSubject'] ?? $input['subject'] ?? $input['body'] ?? ''),
+                (string) ($input['callScheduledDateTime'] ?? $input['next_at'] ?? $input['scheduled_at'] ?? '')
+            );
 
             return $this->ok(['id' => $id]);
         });
@@ -1451,6 +1505,22 @@ class DeskApi extends BaseController
                 'lead'            => (string) ($this->sites->lead($this->tenant(), $leadId)['name'] ?? ''),
                 'name'            => $this->personName($staffId),
             ]);
+            $projectName = '';
+            $projectId = (int) ($input['projectId'] ?? $input['project_id'] ?? 0);
+
+            if ($projectId > 0) {
+                $project = db_connect()->table('projects')->select('name')->where('tenant_id', $this->tenant())->where('id', $projectId)->get()->getRowArray();
+                $projectName = (string) ($project['name'] ?? '');
+            }
+
+            $this->estate->notifyVisitAssign(
+                $this->tenant(),
+                $this->user(),
+                $leadId,
+                $staffId,
+                $projectName,
+                (string) ($input['scheduledDateTime'] ?? $input['scheduled_at'] ?? '')
+            );
 
             return $this->ok(['id' => $id]);
         });
@@ -1517,7 +1587,7 @@ class DeskApi extends BaseController
 
     public function tasks(): ResponseInterface
     {
-        if ($denied = $this->guard('followups.view')) {
+        if ($denied = $this->guard('tasks.view')) {
             return $denied;
         }
 
@@ -1526,7 +1596,7 @@ class DeskApi extends BaseController
 
     public function filterTasks(): ResponseInterface
     {
-        if ($denied = $this->guard('followups.view')) {
+        if ($denied = $this->guard('tasks.view')) {
             return $denied;
         }
 
@@ -1535,7 +1605,7 @@ class DeskApi extends BaseController
 
     public function saveTask(): ResponseInterface
     {
-        if ($denied = $this->guard('followups.create')) {
+        if ($denied = $this->guard('tasks.create')) {
             return $denied;
         }
 
@@ -1556,6 +1626,14 @@ class DeskApi extends BaseController
                 'task'            => (string) ($input['subject'] ?? ''),
                 'name'            => $this->personName($assigned),
             ]);
+            $this->estate->notifyTaskAssign(
+                $this->tenant(),
+                $this->user(),
+                $leadId,
+                $assigned,
+                (string) ($input['subject'] ?? ''),
+                (string) ($input['scheduledDateTime'] ?? $input['scheduled_at'] ?? '')
+            );
 
             return $this->ok(['id' => $id]);
         });
@@ -1563,7 +1641,7 @@ class DeskApi extends BaseController
 
     public function doneTask(int $id): ResponseInterface
     {
-        if ($denied = $this->guard('followups.create')) {
+        if ($denied = $this->guard('tasks.update')) {
             return $denied;
         }
 
@@ -1590,7 +1668,7 @@ class DeskApi extends BaseController
 
     public function rescheduleTask(int $id): ResponseInterface
     {
-        if ($denied = $this->guard('followups.create')) {
+        if ($denied = $this->guard('tasks.update')) {
             return $denied;
         }
 
@@ -2093,7 +2171,7 @@ class DeskApi extends BaseController
 
     public function messages(): ResponseInterface
     {
-        if ($denied = $this->guard('leads.view')) {
+        if ($denied = $this->guard('whatsapp.manage')) {
             return $denied;
         }
 
@@ -2677,9 +2755,44 @@ class DeskApi extends BaseController
     {
         try {
             $context['actor'] = $context['actor'] ?? $this->personName($this->user());
-            $this->alerts()->trigger($this->tenant(), $this->user(), $event, $context);
+            $sent = $this->alerts()->trigger($this->tenant(), $this->user(), $event, $context);
+            $userId = (int) ($context['subject_user_id'] ?? 0);
+
+            if ($sent > 0 || $userId < 1 || $userId === $this->user()) {
+                return;
+            }
+
+            $copy = $this->noticeCopy($event, $context);
+
+            if ($copy === null) {
+                return;
+            }
+
+            $this->alerts()->remindUser($this->tenant(), $userId, $event, $copy[0], $copy[1], $copy[2], (int) ($context['subject_id'] ?? 0));
         } catch (Throwable $e) {
         }
+    }
+
+    /**
+     * @param array<string, mixed> $context
+     * @return array{0: string, 1: string, 2: string}|null
+     */
+    private function noticeCopy(string $event, array $context): ?array
+    {
+        $lead = trim((string) ($context['lead'] ?? ''));
+        $lead = $lead !== '' ? $lead : 'a lead';
+        $task = trim((string) ($context['task'] ?? ''));
+
+        return match ($event) {
+            'lead.assigned' => ['New lead', ! empty($context['team']) ? 'A new lead has been assigned to your team - ' . $lead : 'A new lead has been assigned to you - ' . $lead, 'lead'],
+            'followup.created' => ['Follow-up', 'A new follow-up has been assigned to you', 'followup'],
+            'visit.scheduled' => ['Visit', 'A new visit has been assigned to you', 'visit'],
+            'task.assigned' => ['Task', 'A new task has been assigned to you', 'task'],
+            'task.completed' => ['Task', $task !== '' ? $task . ' is completed' : 'A task is completed', 'task'],
+            'attendance.marked' => ['Attendance', 'Attendance was marked', 'attendance'],
+            'deal.approved' => ['Deal', 'The deal for ' . $lead . ' is approved', 'deal'],
+            default => null,
+        };
     }
 
     private function alertLead(int $id): void
@@ -2690,14 +2803,35 @@ class DeskApi extends BaseController
             return;
         }
 
+        $leadName = (string) ($lead['name'] ?? '');
+
+        if (strtoupper((string) ($lead['assigned_type'] ?? 'USER')) === 'GROUP') {
+            foreach ($this->estate->memberIds($this->tenant(), (int) ($lead['group_id'] ?? 0)) as $memberId) {
+                $this->alert('lead.assigned', [
+                    'subject_user_id' => $memberId,
+                    'subject_type'    => 'lead',
+                    'subject_id'      => $id,
+                    'lead'            => $leadName,
+                    'team'            => true,
+                ]);
+            }
+
+            foreach ($this->estate->memberIds($this->tenant(), (int) ($lead['group_id'] ?? 0)) as $memberId) {
+                $this->estate->notifyLeadAssignTo($this->tenant(), $this->user(), $lead, $memberId);
+            }
+
+            return;
+        }
+
         $ownerId = (int) ($lead['owner_id'] ?? 0);
         $this->alert('lead.assigned', [
             'subject_user_id' => $ownerId,
             'subject_type'    => 'lead',
             'subject_id'      => $id,
-            'lead'            => (string) ($lead['name'] ?? ''),
+            'lead'            => $leadName,
             'name'            => (string) ($lead['owner_name'] ?? ''),
         ]);
+        $this->estate->notifyLeadAssign($this->tenant(), $this->user(), $id);
     }
 
     private function personName(int $userId): string

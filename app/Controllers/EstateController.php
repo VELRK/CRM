@@ -292,9 +292,15 @@ class EstateController extends PortalController
             'active'    => 'whatsapp',
             'templates' => $this->estate->templates($this->tenantId),
             'phone'     => $this->estate->setting($this->tenantId, 'whatsapp_phone') ?? '',
+            'welcome'          => $this->estate->setting($this->tenantId, 'whatsapp_welcome') ?? '',
+            'leadAssign'       => $this->estate->setting($this->tenantId, 'whatsapp_lead_assign') ?? '',
+            'followupAssign'   => $this->estate->setting($this->tenantId, 'whatsapp_followup_assign') ?? '',
             'followupReminder' => $this->estate->setting($this->tenantId, 'whatsapp_followup_reminder') ?? '',
+            'visitAssign'      => $this->estate->setting($this->tenantId, 'whatsapp_visit_assign') ?? '',
             'visitReminder'    => $this->estate->setting($this->tenantId, 'whatsapp_visit_reminder') ?? '',
+            'taskAssign'       => $this->estate->setting($this->tenantId, 'whatsapp_task_assign') ?? '',
             'taskReminder'     => $this->estate->setting($this->tenantId, 'whatsapp_task_reminder') ?? '',
+            'dealApprove'      => $this->estate->setting($this->tenantId, 'whatsapp_deal_approve') ?? '',
             'open'      => old('form') === 'template',
             'messages'  => $this->estate->messages($this->tenantId, [
                 'status' => (string) $this->request->getGet('status'),
@@ -328,9 +334,15 @@ class EstateController extends PortalController
             $this->estate->saveSetting($this->tenantId, 'whatsapp_token', $token);
         }
 
+        $this->estate->saveSetting($this->tenantId, 'whatsapp_welcome', trim((string) $this->request->getPost('whatsapp_welcome')));
+        $this->estate->saveSetting($this->tenantId, 'whatsapp_lead_assign', trim((string) $this->request->getPost('whatsapp_lead_assign')));
+        $this->estate->saveSetting($this->tenantId, 'whatsapp_followup_assign', trim((string) $this->request->getPost('whatsapp_followup_assign')));
         $this->estate->saveSetting($this->tenantId, 'whatsapp_followup_reminder', trim((string) $this->request->getPost('whatsapp_followup_reminder')));
+        $this->estate->saveSetting($this->tenantId, 'whatsapp_visit_assign', trim((string) $this->request->getPost('whatsapp_visit_assign')));
         $this->estate->saveSetting($this->tenantId, 'whatsapp_visit_reminder', trim((string) $this->request->getPost('whatsapp_visit_reminder')));
+        $this->estate->saveSetting($this->tenantId, 'whatsapp_task_assign', trim((string) $this->request->getPost('whatsapp_task_assign')));
         $this->estate->saveSetting($this->tenantId, 'whatsapp_task_reminder', trim((string) $this->request->getPost('whatsapp_task_reminder')));
+        $this->estate->saveSetting($this->tenantId, 'whatsapp_deal_approve', trim((string) $this->request->getPost('whatsapp_deal_approve')));
 
         return redirect()->to('/app/whatsapp')->with('message', 'WhatsApp settings saved. Messages go out through AskEva.');
     }

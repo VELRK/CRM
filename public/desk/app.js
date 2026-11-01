@@ -22,13 +22,14 @@ const screenAccess = {
     leads: 'leads.view',
     followups: 'followups.view',
     visits: 'visits.view',
-    tasks: 'followups.view',
+    tasks: 'tasks.view',
     attendance: 'attendance.view',
     locations: 'attendance.view',
     incentives: 'incentives.view',
     activity: 'team.view',
-    whatsapp: 'leads.view',
+    whatsapp: 'whatsapp.manage',
     push: 'notifications.manage',
+    api: 'workspace.settings',
     settings: 'workspace.settings',
     deals: 'deals.view',
     'campaign-sources': 'masters.view',
@@ -978,8 +979,8 @@ function Board({ kind, title, rows, onReload, onRow, onOpen, onEdit, onDelete, a
         } catch (e) { setError(e.message); }
     }
     const [savingMove, saveMove] = useSubmitLock(reschedule);
-    const canDone = kind === 'visits' ? allows(user, 'visits.attend') : allows(user, 'followups.create');
-    const canMove = kind === 'visits' ? allows(user, 'visits.create') : allows(user, 'followups.create');
+    const canDone = kind === 'visits' ? allows(user, 'visits.attend') : kind === 'tasks' ? allows(user, 'tasks.update') : allows(user, 'followups.create');
+    const canMove = kind === 'visits' ? allows(user, 'visits.create') : kind === 'tasks' ? allows(user, 'tasks.update') : allows(user, 'followups.create');
     function actions(row) {
         const closed = ['COMPLETED', 'CANCELLED'].includes(String(row.display_status || '').toUpperCase());
         if (closed || (!canDone && !canMove)) return null;
@@ -1154,7 +1155,7 @@ function LeadPage({ leadId, onBack, user }) {
     const openCalls = openOf(calls);
     const openVisits = openOf(visits);
     const openTasks = openOf(tasks);
-    const openCount = openCalls.length + openVisits.length + openTasks.length;
+    const openCount = (allows(user, 'followups.view') ? openCalls.length : 0) + (allows(user, 'visits.view') ? openVisits.length : 0) + (allows(user, 'tasks.view') ? openTasks.length : 0);
     const shownNotes = [...notes].sort((a, b) => noteSort === 'new' ? String(b.created_at).localeCompare(String(a.created_at)) : String(a.created_at).localeCompare(String(b.created_at)));
     function fact(label, value) {
         return html`<div class="fact"><span>${label}</span><div>${value || '—'}</div></div>`;
@@ -1229,9 +1230,18 @@ function LeadPage({ leadId, onBack, user }) {
     const canWhatsapp = allows(user, 'whatsapp.manage');
     const canFollow = allows(user, 'followups.create');
     const canVisit = allows(user, 'visits.create');
-    const canTask = allows(user, 'followups.create') && canEdit;
-    const canFinish = tab === 'visits' ? allows(user, 'visits.attend') : allows(user, 'followups.create');
-    const activityRows = tab === 'followups' ? openCalls : tab === 'visits' ? openVisits : openTasks;
+    const canTask = allows(user, 'tasks.create') && canEdit;
+    const canSeeFollow = allows(user, 'followups.view');
+    const canSeeVisit = allows(user, 'visits.view');
+    const canSeeTask = allows(user, 'tasks.view');
+    const activityTabs = [
+        canSeeFollow ? ['followups', 'Follow-ups', openCalls.length] : null,
+        canSeeVisit ? ['visits', 'Visits', openVisits.length] : null,
+        canSeeTask ? ['tasks', 'Tasks', openTasks.length] : null,
+    ].filter(Boolean);
+    const activeTab = activityTabs.some((item) => item[0] === tab) ? tab : (activityTabs[0] ? activityTabs[0][0] : '');
+    const canFinish = activeTab === 'visits' ? allows(user, 'visits.attend') : activeTab === 'tasks' ? allows(user, 'tasks.update') : allows(user, 'followups.create');
+    const activityRows = activeTab === 'followups' ? openCalls : activeTab === 'visits' ? openVisits : openTasks;
     return html`<div class="lead-page">
         <aside class="lead-side">
             <button type="button" class="back-link" onClick=${onBack}><span>←</span> Back to Leads</button>
@@ -1334,7 +1344,7 @@ function LeadPage({ leadId, onBack, user }) {
                     </div>` : null}
                 </div>
                 <div class="activity-tabs">
-                    ${[['followups', 'Follow-ups', openCalls.length], ['visits', 'Visits', openVisits.length], ['tasks', 'Tasks', openTasks.length]].map(([key, label, count]) => html`<button type="button" key=${key} class=${tab === key ? 'on' : ''} onClick=${() => setTab(key)}>${label} <em>${count}</em></button>`)}
+                    ${activityTabs.map(([key, label, count]) => html`<button type="button" key=${key} class=${activeTab === key ? 'on' : ''} onClick=${() => setTab(key)}>${label} <em>${count}</em></button>`)}
                 </div>
                 ${activityRows.length === 0 ? html`<p class="empty-line">Nothing scheduled yet</p>` : html`<table class="board-table"><tbody>
                     ${activityRows.map((row) => html`<tr key=${row.id}>
@@ -2006,7 +2016,7 @@ function Resource({ title, lede, spec, user }) {
         leadDelete: allows(user, 'leads.delete'),
         followup: actions.includes('followup') && allows(user, 'followups.create'),
         visit: actions.includes('visit') && allows(user, 'visits.create'),
-        task: actions.includes('task') && allows(user, 'followups.create'),
+        task: actions.includes('task') && allows(user, 'tasks.create'),
         assign: actions.includes('assign') && allows(user, 'leads.transfer'),
         user: actions.includes('user') && allows(user, 'team.invite'),
         staffEdit: actions.includes('staff-edit') && allows(user, 'staff.update'),
@@ -2209,7 +2219,7 @@ function Heatmap({ visits, followups }) {
     ${popup ? createPortal(popup, document.body) : null}
     </div>`;
 }
-function Home({ onOpen }) {
+function Home({ onOpen, user }) {
     const [board, setBoard] = useState(null);
     const [leads, setLeads] = useState([]);
     const [visits, setVisits] = useState([]);
@@ -2217,12 +2227,14 @@ function Home({ onOpen }) {
     const [error, setError] = useState('');
     const [day, setDay] = useState(() => dayKey(new Date()));
     const [page, setPage] = useState(0);
+    const can = (key) => allows(user, key);
+    const see = (key) => can('reports.view') || can(key);
     useEffect(() => {
         Promise.all([
-            call('/api/v1/reports').catch(() => ({})),
-            call('/api/v1/leads').catch(() => []),
-            call('/api/v1/visits').catch(() => []),
-            call('/api/v1/followups').catch(() => []),
+            can('reports.view') ? call('/api/v1/reports').catch(() => ({})) : Promise.resolve({}),
+            see('leads.view') ? call('/api/v1/leads').catch(() => []) : Promise.resolve([]),
+            see('visits.view') ? call('/api/v1/visits').catch(() => []) : Promise.resolve([]),
+            see('followups.view') ? call('/api/v1/followups').catch(() => []) : Promise.resolve([]),
         ]).then(([report, leadRows, visitRows, followRows]) => {
             setBoard(report);
             setLeads(Array.isArray(leadRows) ? leadRows : []);
@@ -2298,15 +2310,16 @@ function Home({ onOpen }) {
         { key: 'bookings', label: 'Bookings', color: '#0ab39c' },
     ];
     const cards = [
-        ['info', 'Visits scheduled', board.visits ?? 0, html`<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"><path d="M8 3v3M16 3v3M4 9h16M6 5h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z"/></svg>`, 'visits'],
-        ['primary', 'New leads', fresh ? fresh.total : 0, html`<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"><circle cx="10" cy="8" r="3"/><path d="M4 19a6 6 0 0 1 12 0M18 8v6M15 11h6"/></svg>`, 'leads'],
-        ['warning', 'Open follow-ups', board.followups ?? 0, html`<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"><circle cx="12" cy="12" r="8"/><path d="M12 8v5l3 2"/></svg>`, 'followups'],
-        ['danger', 'Total leads', board.leads ?? 0, html`<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"><path d="M12 21s7-6 7-11a7 7 0 1 0-14 0c0 5 7 11 7 11z"/><circle cx="12" cy="10" r="2"/></svg>`, 'leads'],
-        ['secondary', 'Plots available', board.available ?? 0, html`<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"><rect x="4" y="4" width="7" height="7" rx="1"/><rect x="13" y="4" width="7" height="7" rx="1"/><rect x="4" y="13" width="7" height="7" rx="1"/><rect x="13" y="13" width="7" height="7" rx="1"/></svg>`, 'projects'],
-        ['success', 'Sales value', money(earned), html`<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"><rect x="3" y="6" width="18" height="13" rx="2"/><path d="M3 10h18M7 15h4"/></svg>`, 'incentives'],
-    ];
+        ['info', 'Visits scheduled', can('reports.view') ? (board.visits ?? 0) : visits.length, html`<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"><path d="M8 3v3M16 3v3M4 9h16M6 5h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z"/></svg>`, 'visits', 'visits.view'],
+        ['primary', 'New leads', fresh ? fresh.total : leads.filter((row) => row.status === 'new').length, html`<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"><circle cx="10" cy="8" r="3"/><path d="M4 19a6 6 0 0 1 12 0M18 8v6M15 11h6"/></svg>`, 'leads', 'leads.view'],
+        ['warning', 'Open follow-ups', can('reports.view') ? (board.followups ?? 0) : followups.length, html`<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"><circle cx="12" cy="12" r="8"/><path d="M12 8v5l3 2"/></svg>`, 'followups', 'followups.view'],
+        ['danger', 'Total leads', can('reports.view') ? (board.leads ?? 0) : leads.length, html`<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"><path d="M12 21s7-6 7-11a7 7 0 1 0-14 0c0 5 7 11 7 11z"/><circle cx="12" cy="10" r="2"/></svg>`, 'leads', 'leads.view'],
+        ['secondary', 'Plots available', board.available ?? 0, html`<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"><rect x="4" y="4" width="7" height="7" rx="1"/><rect x="13" y="4" width="7" height="7" rx="1"/><rect x="4" y="13" width="7" height="7" rx="1"/><rect x="13" y="13" width="7" height="7" rx="1"/></svg>`, 'projects', 'reports.view'],
+        ['success', 'Sales value', money(earned), html`<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"><rect x="3" y="6" width="18" height="13" rx="2"/><path d="M3 10h18M7 15h4"/></svg>`, 'incentives', 'reports.view'],
+    ].filter((card) => card[5] === 'reports.view' ? can('reports.view') : see(card[5]));
+    const showSchedule = see('visits.view') || see('followups.view');
     return html`<section class="dosix">
-        <article class="panel schedule">
+        ${showSchedule ? html`<article class="panel schedule">
             <header class="panel-head"><h2>Schedule</h2><span class="muted">${day.slice(0, 7)}</span></header>
             <div class="day-strip">
                 ${days.map((date) => html`<button key=${dayKey(date)} class=${`day-chip${dayKey(date) === day ? ' on' : ''}`} onClick=${() => setDay(dayKey(date))}>
@@ -2325,25 +2338,25 @@ function Home({ onOpen }) {
                     </div>`}
                 </li>`)}
             </ol>
-        </article>
+        </article>` : null}
         <div class="dosix-main">
-            <div class="metrics span-7">
+            ${cards.length ? html`<div class="metrics span-7">
                 ${cards.map(([tone, label, value, icon, target]) => html`<button class="metric" key=${label} onClick=${() => onOpen(target)}>
                     <span class=${`metric-icon ${tone}`}>${icon}</span>
                     <h3 class=${String(value).length > 10 ? 'compact' : ''}>${value}</h3>
                     <p>${label}</p>
                 </button>`)}
-            </div>
-            <article class="panel span-5 tall">
+            </div>` : null}
+            ${can('reports.view') && see('leads.view') ? html`<article class="panel span-5 tall">
                 <header class="panel-head"><h2>Lead intake</h2><button class="linkish" onClick=${() => onOpen('leads')}>View all leads</button></header>
                 <${Intake} points=${board.intake || []} />
-            </article>
-            <article class="panel span-12">
+            </article>` : null}
+            ${see('visits.view') || see('followups.view') ? html`<article class="panel span-12">
                 <header class="panel-head"><h2>Booking view</h2><span class="muted">Last 7 days · 9 AM to 6 PM</span></header>
-                <${Heatmap} visits=${visits} followups=${followups} />
+                <${Heatmap} visits=${see('visits.view') ? visits : []} followups=${see('followups.view') ? followups : []} />
                 <p class="muted heat-note">Click an hour to see the visits and follow-ups booked then.</p>
-            </article>
-            <article class="panel table-card span-8">
+            </article>` : null}
+            ${see('leads.view') ? html`<article class="panel table-card span-8">
                 <header class="panel-head"><h2>Leads</h2><button class="linkish" onClick=${() => onOpen('leads')}>Open list</button></header>
                 <table>
                     <thead><tr><th>#</th><th>Name</th><th>Source</th><th>Status</th><th>Phone</th></tr></thead>
@@ -2365,48 +2378,48 @@ function Home({ onOpen }) {
                         <button class="ghost" disabled=${safePage >= pages - 1} onClick=${() => setPage(safePage + 1)}>Next</button>
                     </div>
                 </div>
-            </article>
-            <article class="panel span-4">
+            </article>` : null}
+            ${can('reports.view') && see('leads.view') ? html`<article class="panel span-4">
                 <header class="panel-head"><h2>Conversion</h2></header>
                 <${FunnelChart} rows=${conversionRows} />
-            </article>
-            <article class="panel span-4">
+            </article>` : null}
+            ${can('reports.view') && see('leads.view') ? html`<article class="panel span-4">
                 <header class="panel-head"><h2>Lead sources</h2></header>
                 <${Pie} rows=${(board.sources || []).map((row) => ({ label: row.label, total: row.total }))} />
-            </article>
-            <article class="panel span-4">
+            </article>` : null}
+            ${can('reports.view') && see('leads.view') ? html`<article class="panel span-4">
                 <header class="panel-head"><h2>Status funnel</h2></header>
                 <${StatusFunnel} rows=${board.funnel || []} />
-            </article>
-            <article class="panel span-4">
+            </article>` : null}
+            ${can('reports.view') && see('visits.view') ? html`<article class="panel span-4">
                 <header class="panel-head"><h2>Site visits</h2><button class="linkish" onClick=${() => onOpen('visits')}>Visits</button></header>
                 <${VBars} rows=${visitBars} />
-            </article>
-            <article class="panel span-4">
+            </article>` : null}
+            ${can('reports.view') && see('followups.view') ? html`<article class="panel span-4">
                 <header class="panel-head"><h2>Follow-ups</h2><button class="linkish" onClick=${() => onOpen('followups')}>Follow-ups</button></header>
                 <${VBars} rows=${followRows} />
-            </article>
-            <article class="panel span-4">
+            </article>` : null}
+            ${can('reports.view') && see('attendance.view') ? html`<article class="panel span-4">
                 <header class="panel-head"><h2>Attendance</h2><button class="linkish" onClick=${() => onOpen('attendance')}>Attendance</button></header>
                 <${VBars} rows=${attendanceBars} />
-            </article>
-            <article class="panel span-12">
+            </article>` : null}
+            ${can('reports.view') && see('staff.view') ? html`<article class="panel span-12">
                 <header class="panel-head"><h2>Staff</h2><button class="linkish" onClick=${() => onOpen('staff')}>Staff list</button></header>
                 <${HBars} rows=${board.staff || []} series=${staffSeries} />
-            </article>
-            <article class="panel span-12">
+            </article>` : null}
+            ${can('reports.view') && see('teams.view') ? html`<article class="panel span-12">
                 <header class="panel-head"><h2>Teams</h2></header>
                 <${HBars} rows=${board.teams || []} series=${staffSeries.filter((item) => item.key !== 'overdue')} />
-            </article>
-            <article class="panel span-8">
+            </article>` : null}
+            ${can('reports.view') && see('projects.view') ? html`<article class="panel span-8">
                 <header class="panel-head"><h2>Projects</h2><button class="linkish" onClick=${() => onOpen('projects')}>Projects</button></header>
                 <${HBars} rows=${board.projects || []} series=${[{ key: 'available', label: 'Available', color: '#0ab39c' }, { key: 'booked', label: 'Booked', color: '#1F6B4A' }, { key: 'sold', label: 'Sold', color: '#f7b84b' }, { key: 'sales', label: 'Sales', color: '#f06548' }]} />
-            </article>
-            <article class="panel span-4">
+            </article>` : null}
+            ${can('reports.view') && see('incentives.view') ? html`<article class="panel span-4">
                 <header class="panel-head"><h2>Incentives</h2><button class="linkish" onClick=${() => onOpen('incentives')}>Incentives</button></header>
                 <${VBars} rows=${(board.incentives || []).map((row) => ({ label: row.status, total: Math.round(Number(row.amount_minor || 0) / 100) }))} />
                 <p class="muted heat-note">${board.pending_incentive?.total || 0} pending · ${money(board.pending_incentive?.amount_minor)}</p>
-            </article>
+            </article>` : null}
         </div>
     </section>`;
 }
@@ -3002,7 +3015,7 @@ function CompanyBoard({ onSaved, user }) {
         setError('');
         setSaved('');
         try {
-            const data = await call('/api/v1/company', { method: 'POST', body: { companyName: form.companyName, companyAdminName: form.companyAdminName, companyAdminEmail: form.companyAdminEmail, phone: form.phone || '', address: form.address || '', attendanceLat: form.attendanceLat || '', attendanceLng: form.attendanceLng || '', attendanceKm: form.attendanceKm || '', whatsappPhone: form.whatsapp?.phone || '', whatsappToken: token, whatsappFollowup: form.whatsapp?.followup || '', whatsappVisit: form.whatsapp?.visit || '', whatsappTask: form.whatsapp?.task || '' } });
+            const data = await call('/api/v1/company', { method: 'POST', body: { companyName: form.companyName, companyAdminName: form.companyAdminName, companyAdminEmail: form.companyAdminEmail, phone: form.phone || '', address: form.address || '', attendanceLat: form.attendanceLat || '', attendanceLng: form.attendanceLng || '', attendanceKm: form.attendanceKm || '', whatsappPhone: form.whatsapp?.phone || '', whatsappToken: token, whatsappWelcome: form.whatsapp?.welcome || '', whatsappLeadAssign: form.whatsapp?.leadAssign || '', whatsappFollowupAssign: form.whatsapp?.followupAssign || '', whatsappFollowup: form.whatsapp?.followup || '', whatsappVisitAssign: form.whatsapp?.visitAssign || '', whatsappVisit: form.whatsapp?.visit || '', whatsappTaskAssign: form.whatsapp?.taskAssign || '', whatsappTask: form.whatsapp?.task || '', whatsappDealApprove: form.whatsapp?.dealApprove || '' } });
             setForm(data);
             setToken('');
             setSaved('Settings saved.');
@@ -3055,9 +3068,15 @@ function CompanyBoard({ onSaved, user }) {
         <div class="form-grid">
             ${field('Business number', html`<input value=${form.whatsapp?.phone || ''} onInput=${(event) => setForm({ ...form, whatsapp: { ...(form.whatsapp || {}), phone: event.target.value } })} />`)}
             ${field('AskEva token', html`<input type="password" value=${token} autoComplete="off" placeholder="Leave blank to keep the saved token" onInput=${(event) => setToken(event.target.value)} />`)}
+            ${field('Welcome template', html`<input value=${form.whatsapp?.welcome || ''} placeholder="Exact AskEva template name, sent to the lead" onInput=${(event) => setForm({ ...form, whatsapp: { ...(form.whatsapp || {}), welcome: event.target.value } })} />`)}
+            ${field('Lead assign template', html`<input value=${form.whatsapp?.leadAssign || ''} placeholder="Exact AskEva template name, sent to the new owner" onInput=${(event) => setForm({ ...form, whatsapp: { ...(form.whatsapp || {}), leadAssign: event.target.value } })} />`)}
+            ${field('Follow-up assign template', html`<input value=${form.whatsapp?.followupAssign || ''} placeholder="Exact AskEva template name, sent to the assignee" onInput=${(event) => setForm({ ...form, whatsapp: { ...(form.whatsapp || {}), followupAssign: event.target.value } })} />`)}
             ${field('Follow-up reminder template', html`<input value=${form.whatsapp?.followup || ''} placeholder="Exact AskEva template name" onInput=${(event) => setForm({ ...form, whatsapp: { ...(form.whatsapp || {}), followup: event.target.value } })} />`)}
+            ${field('Visit assign template', html`<input value=${form.whatsapp?.visitAssign || ''} placeholder="Exact AskEva template name, sent to the assignee" onInput=${(event) => setForm({ ...form, whatsapp: { ...(form.whatsapp || {}), visitAssign: event.target.value } })} />`)}
             ${field('Visit reminder template', html`<input value=${form.whatsapp?.visit || ''} placeholder="Exact AskEva template name" onInput=${(event) => setForm({ ...form, whatsapp: { ...(form.whatsapp || {}), visit: event.target.value } })} />`)}
-            ${field('Task reminder template', html`<input value=${form.whatsapp?.task || ''} placeholder="Exact AskEva template name" onInput=${(event) => setForm({ ...form, whatsapp: { ...(form.whatsapp || {}), task: event.target.value } })} />`, true)}
+            ${field('Task assign template', html`<input value=${form.whatsapp?.taskAssign || ''} placeholder="Exact AskEva template name, sent to the assignee" onInput=${(event) => setForm({ ...form, whatsapp: { ...(form.whatsapp || {}), taskAssign: event.target.value } })} />`)}
+            ${field('Task reminder template', html`<input value=${form.whatsapp?.task || ''} placeholder="Exact AskEva template name" onInput=${(event) => setForm({ ...form, whatsapp: { ...(form.whatsapp || {}), task: event.target.value } })} />`)}
+            ${field('Deal approval template', html`<input value=${form.whatsapp?.dealApprove || ''} placeholder="Exact AskEva template name, sent when a manager approves a deal" onInput=${(event) => setForm({ ...form, whatsapp: { ...(form.whatsapp || {}), dealApprove: event.target.value } })} />`, true)}
         </div>
         <h3>Firebase</h3>
         <p class="fine">${form.firebase?.connected ? (form.firebase.source === 'company' ? 'Saved for this company. ' : 'Using the server file. ') + 'Project ' + (form.firebase.project || '') + '. ' + (form.firebase.email || '') : 'Phone push is not connected. Upload the Firebase service account JSON.'}</p>
@@ -3458,7 +3477,7 @@ function WhatsAppBoard({ user }) {
             <div class="activity-filters">
                 <label>Search<input placeholder="Lead, number, subject" value=${text} onInput=${(event) => setText(event.target.value)} /></label>
                 <label>Status<select value=${status} onChange=${(event) => setStatus(event.target.value)}><option value="">All</option><option value="sent">Sent</option><option value="failed">Not delivered</option><option value="queued">Queued</option><option value="delivered">Delivered</option><option value="read">Read</option></select></label>
-                <label>Kind<select value=${kind} onChange=${(event) => setKind(event.target.value)}><option value="">All</option><option value="lead">Lead message</option><option value="followup.reminder">Follow-up reminder</option><option value="visit.reminder">Visit reminder</option><option value="task.reminder">Task reminder</option></select></label>
+                <label>Kind<select value=${kind} onChange=${(event) => setKind(event.target.value)}><option value="">All</option><option value="lead">Lead message</option><option value="welcome">Welcome</option><option value="lead.assign">Lead assign</option><option value="followup.assign">Follow-up assign</option><option value="followup.reminder">Follow-up reminder</option><option value="visit.assign">Visit assign</option><option value="visit.reminder">Visit reminder</option><option value="task.assign">Task assign</option><option value="task.reminder">Task reminder</option><option value="deal.approve">Deal approved</option></select></label>
                 <label>From<input type="date" value=${from} onInput=${(event) => setFrom(event.target.value)} /></label>
                 <label>To<input type="date" value=${to} onInput=${(event) => setTo(event.target.value)} /></label>
             </div>
@@ -3930,7 +3949,7 @@ function App() {
                 </div>
             </header>
             <main class="main">
-                ${screen === 'home' ? html`<${Home} onOpen=${setScreen} />` : null}
+                ${screen === 'home' ? html`<${Home} onOpen=${setScreen} user=${user} />` : null}
                 ${screen === 'reports' ? html`<${Reports} user=${user} />` : null}
                 ${screen === 'api' ? html`<${Console} />` : null}
                 ${screen === 'notifications' ? html`<${NoticeBoard} />` : null}

@@ -278,6 +278,7 @@ class AccessCatalog
                 'deals.view', 'deals.approve',
                 'masters.view',
                 'followups.view', 'followups.create',
+                'tasks.view', 'tasks.create', 'tasks.update',
                 'visits.view', 'visits.create', 'visits.attend',
                 'attendance.view', 'reports.view', 'sales.view', 'incentives.view', 'exports.download', 'files.view',
             ],
@@ -285,6 +286,7 @@ class AccessCatalog
                 'staff.view', 'projects.view', 'plots.view',
                 'leads.view', 'leads.create', 'leads.update',
                 'followups.view', 'followups.create',
+                'tasks.view', 'tasks.create', 'tasks.update',
                 'visits.view', 'visits.attend',
                 'attendance.view', 'attendance.mark',
                 'reports.view', 'exports.download',
@@ -308,6 +310,7 @@ class AccessCatalog
             'Collaborator' => [
                 'leads.view', 'leads.transfer',
                 'followups.view', 'followups.create',
+                'tasks.view', 'tasks.create', 'tasks.update',
                 'visits.view', 'visits.create', 'visits.attend',
                 'deals.view',
             ],
