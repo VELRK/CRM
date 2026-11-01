@@ -72,6 +72,7 @@ class AccessCatalog
                 ['key' => 'deals.update', 'label' => 'Edit deals'],
                 ['key' => 'deals.delete', 'label' => 'Delete deals'],
                 ['key' => 'deals.move_stage', 'label' => 'Move a deal stage'],
+                ['key' => 'deals.approve', 'label' => 'Approve a deal for the team'],
             ],
             'Work' => [
                 ['key' => 'tasks.view', 'label' => 'View tasks'],
@@ -132,6 +133,11 @@ class AccessCatalog
                 ['key' => 'leads.delete', 'label' => 'Delete leads'],
                 ['key' => 'leads.transfer', 'label' => 'Transfer a lead'],
                 ['key' => 'leads.restore', 'label' => 'Restore a removed lead'],
+                ['key' => 'leads.approve', 'label' => 'Approve a lead before it is assigned'],
+            ],
+            'Master lists' => [
+                ['key' => 'masters.view', 'label' => 'View master lists'],
+                ['key' => 'masters.manage', 'label' => 'Add and edit master lists'],
             ],
             'Follow-ups' => [
                 ['key' => 'followups.view', 'label' => 'View follow-ups'],
@@ -246,7 +252,7 @@ class AccessCatalog
             'Manager' => [
                 'contacts.view', 'contacts.create', 'contacts.update', 'contacts.assign',
                 'companies.view', 'companies.create', 'companies.update',
-                'deals.view', 'deals.create', 'deals.update', 'deals.move_stage',
+                'deals.view', 'deals.create', 'deals.update', 'deals.move_stage', 'deals.approve',
                 'tasks.view', 'tasks.create', 'tasks.update',
                 'activities.create',
                 'products.view',
@@ -259,7 +265,8 @@ class AccessCatalog
                 'staff.view', 'staff.update',
                 'projects.view', 'projects.create', 'projects.update',
                 'plots.view', 'plots.create', 'plots.update',
-                'leads.view', 'leads.create', 'leads.update', 'leads.transfer',
+                'leads.view', 'leads.create', 'leads.update', 'leads.transfer', 'leads.approve',
+                'masters.view',
                 'followups.view', 'followups.create',
                 'visits.view', 'visits.create', 'visits.attend',
                 'teams.view', 'attendance.view', 'sales.view', 'incentives.view', 'exports.download',
@@ -267,7 +274,9 @@ class AccessCatalog
             'Team Head' => [
                 'staff.view', 'team.view', 'teams.view',
                 'projects.view', 'plots.view',
-                'leads.view', 'leads.update', 'leads.transfer',
+                'leads.view', 'leads.update', 'leads.transfer', 'leads.approve',
+                'deals.view', 'deals.approve',
+                'masters.view',
                 'followups.view', 'followups.create',
                 'visits.view', 'visits.create', 'visits.attend',
                 'attendance.view', 'reports.view', 'sales.view', 'incentives.view', 'exports.download', 'files.view',
@@ -295,6 +304,12 @@ class AccessCatalog
                 'followups.view', 'followups.create',
                 'visits.view', 'visits.create', 'visits.attend',
                 'attendance.view', 'attendance.mark',
+            ],
+            'Collaborator' => [
+                'leads.view', 'leads.transfer',
+                'followups.view', 'followups.create',
+                'visits.view', 'visits.create', 'visits.attend',
+                'deals.view',
             ],
             'Viewer' => array_values(array_filter(
                 $all,

@@ -1,3 +1,6 @@
+.master-form { display: flex; gap: 8px; margin: 0 0 16px; align-items: center; flex-wrap: wrap; }
+.master-form input { min-width: 240px; }
+.hint { display: block; margin-top: 4px; color: #667085; font-size: 12px; }
 :root {
     --ink: #102018;
     --muted: #5c6b63;
@@ -476,6 +479,7 @@ th.num, td.num { text-align: right; }
 .push-tabs { display: flex; gap: 8px; margin: 8px 0 12px; }
 .form-actions { display: flex; gap: 8px; margin-top: 12px; }
 .activity-filters { display: grid; grid-template-columns: minmax(160px, 1fr) minmax(140px, 220px) 160px 160px; gap: 12px; margin-bottom: 12px; }
+.project-cover, .avail-card img { width: 160px; height: 110px; object-fit: cover; border-radius: 10px; border: 1px solid #d7e0da; }
 .plot-photos { display: flex; flex-wrap: wrap; gap: 12px; }
 .plot-photos figure { margin: 0; display: grid; gap: 6px; justify-items: start; }
 .plot-photos img { width: 120px; height: 88px; object-fit: cover; border-radius: 8px; border: 1px solid #d7e0da; }
@@ -573,6 +577,9 @@ button.primary:disabled, button.danger:disabled { opacity: .55; cursor: wait; }
 .nav-group:nth-child(2) .nav-label { color: #2563EB; }
 .nav-group:nth-child(3) .nav-label { color: #D97706; }
 .nav-group:nth-child(4) .nav-label { color: #7C3AED; }
+.nav-group:nth-child(5) .nav-label { color: #0E8A4A; }
+.nav-group:nth-child(6) .nav-label { color: #2563EB; }
+.nav-group:nth-child(7) .nav-label { color: #D97706; }
 .sidebar button.active, .sidebar button.active:hover { background: #0E8A4A; color: #fff; box-shadow: inset 4px 0 0 #F59E0B; }
 .sidebar button:hover { background: #E8F8EF; }
 .sidebar .nav-pin:hover { background: #DBEAFE; color: #1D4ED8; }

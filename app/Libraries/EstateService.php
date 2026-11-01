@@ -180,6 +180,7 @@ class EstateService
     public function catalogItems(int $tenantId, string $kind, ?bool $activeOnly = null): array
     {
         $this->assertCatalogKind($kind);
+        $this->seedCatalog($tenantId, $kind);
 
         if (! $this->db->tableExists('lookup_items')) {
             return [];
@@ -382,9 +383,188 @@ class EstateService
         ];
     }
 
+    public function assertCatalogValue(int $tenantId, string $kind, string $label): void
+    {
+        $label = trim($label);
+        $this->seedCatalog($tenantId, $kind);
+
+        foreach ($this->catalogItems($tenantId, $kind, true) as $row) {
+            if ((string) ($row['name'] ?? '') === $label) {
+                return;
+            }
+        }
+
+        throw new RuntimeException('Choose a value from the master list.');
+    }
+
+    public function ensureWorkflowAccess(): void
+    {
+        static $done = false;
+
+        if ($done || ! $this->db->tableExists('roles') || ! $this->db->tableExists('tenants')) {
+            return;
+        }
+
+        $done = true;
+        $tenants = $this->db->table('tenants')->select('id')->get()->getResultArray();
+
+        foreach ($tenants as $tenant) {
+            $tenantId = (int) $tenant['id'];
+            $this->grantRoleKeys($tenantId, ['Admin'], ['masters.view', 'masters.manage', 'leads.approve', 'deals.approve']);
+            $this->grantRoleKeys($tenantId, ['Manager', 'Team Head'], ['leads.approve', 'deals.approve', 'deals.view', 'masters.view']);
+            $this->ensureNamedRole($tenantId, 'Collaborator', AccessCatalog::forStarter('Collaborator'));
+        }
+    }
+
+    /**
+     * @param list<string> $names
+     * @param list<string> $keys
+     */
+    private function grantRoleKeys(int $tenantId, array $names, array $keys): void
+    {
+        $roles = $this->db->table('roles')
+            ->select('id')
+            ->where('tenant_id', $tenantId)
+            ->where('deleted_at', null)
+            ->whereIn('name', $names)
+            ->get()
+            ->getResultArray();
+
+        foreach ($roles as $role) {
+            $this->grantKeys((int) $role['id'], $keys);
+        }
+    }
+
+    /**
+     * @param list<string> $keys
+     */
+    private function ensureNamedRole(int $tenantId, string $name, array $keys): void
+    {
+        $role = $this->db->table('roles')
+            ->select('id')
+            ->where('tenant_id', $tenantId)
+            ->where('name', $name)
+            ->where('deleted_at', null)
+            ->get()
+            ->getRowArray();
+
+        if ($role === null) {
+            $row = [
+                'tenant_id'  => $tenantId,
+                'name'       => $name,
+                'is_system'  => 1,
+                'created_at' => date('Y-m-d H:i:s'),
+                'updated_at' => date('Y-m-d H:i:s'),
+            ];
+
+            if ($this->db->fieldExists('is_owner', 'roles')) {
+                $row['is_owner'] = 0;
+            }
+
+            $this->db->table('roles')->insert($row);
+            $roleId = (int) $this->db->insertID();
+        } else {
+            $roleId = (int) $role['id'];
+        }
+
+        $this->grantKeys($roleId, $keys);
+    }
+
+    /**
+     * @param list<string> $keys
+     */
+    private function grantKeys(int $roleId, array $keys): void
+    {
+        if ($roleId < 1 || ! $this->db->tableExists('role_permissions')) {
+            return;
+        }
+
+        foreach ($keys as $key) {
+            $exists = $this->db->table('role_permissions')
+                ->where('role_id', $roleId)
+                ->where('permission_key', $key)
+                ->countAllResults();
+
+            if ($exists > 0) {
+                continue;
+            }
+
+            $this->db->table('role_permissions')->insert([
+                'role_id'        => $roleId,
+                'permission_key' => $key,
+            ]);
+        }
+    }
+
+    private function seedCatalog(int $tenantId, string $kind): void
+    {
+        if (! $this->db->tableExists('lookup_items')) {
+            return;
+        }
+
+        $live = $this->db->table('lookup_items')
+            ->where('tenant_id', $tenantId)
+            ->where('kind', $kind)
+            ->where('deleted_at', null)
+            ->countAllResults();
+
+        if ($live > 0) {
+            return;
+        }
+
+        $order = 1;
+
+        foreach ($this->catalogDefaults($kind) as $label) {
+            $code = $this->catalogCode($label);
+            $existing = $this->db->table('lookup_items')
+                ->where('tenant_id', $tenantId)
+                ->where('kind', $kind)
+                ->where('code', $code)
+                ->get()
+                ->getRowArray();
+
+            if ($existing !== null) {
+                $this->db->table('lookup_items')->where('id', (int) $existing['id'])->update([
+                    'label'      => $label,
+                    'sort_order' => $order,
+                    'active'     => 1,
+                    'deleted_at' => null,
+                ]);
+            } else {
+                $this->db->table('lookup_items')->insert([
+                    'tenant_id'  => $tenantId,
+                    'kind'       => $kind,
+                    'code'       => $code,
+                    'label'      => $label,
+                    'sort_order' => $order,
+                    'active'     => 1,
+                    'deleted_at' => null,
+                ]);
+            }
+
+            $order++;
+        }
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function catalogDefaults(string $kind): array
+    {
+        return match ($kind) {
+            'lead_stage' => ['New', 'Qualified', 'Follow Up', 'Proposal Sent', 'Site Visit Scheduled', 'Negotiation', 'Booked', 'Lost'],
+            'lead_source' => ['Website', 'Facebook', 'Instagram', 'Walk-in', 'Referral', 'WhatsApp'],
+            'campaign_source' => ['Website', 'Facebook', 'Instagram', 'Email', 'Portal', 'Event'],
+            'followup_purpose' => ['Introduction', 'Follow up', 'Site visit reminder', 'Negotiation', 'Closure'],
+            'call_feedback' => ['Interested', 'Call back later', 'Not reachable', 'Not interested', 'Site visit planned'],
+            'visit_feedback' => ['Interested', 'Needs time', 'Not interested', 'Ready to book', 'Reschedule'],
+            default => [],
+        };
+    }
+
     private function assertCatalogKind(string $kind): void
     {
-        if (! in_array($kind, ['lead_stage', 'lead_source', 'campaign_source'], true)) {
+        if (! in_array($kind, ['lead_stage', 'lead_source', 'campaign_source', 'followup_purpose', 'call_feedback', 'visit_feedback'], true)) {
             throw new RuntimeException('That list is not available.');
         }
     }
@@ -1157,6 +1337,10 @@ class EstateService
     {
         if ($isOwner || in_array($roleName, ['Owner', 'Admin', 'Viewer'], true)) {
             return ['level' => 'company', 'label' => 'Company', 'user_ids' => null, 'team_ids' => null];
+        }
+
+        if ($roleName === 'Collaborator') {
+            return ['level' => 'collaborator', 'label' => 'Assigned leads', 'user_ids' => [$userId], 'team_ids' => []];
         }
 
         if (in_array($roleName, ['Manager', 'Team Head', 'Team Lead'], true) && $this->db->tableExists('teams')) {

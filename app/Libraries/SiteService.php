@@ -128,12 +128,20 @@ class SiteService
      */
     public function projects(int $tenantId): array
     {
-        return $this->db->table('projects')
+        $this->ensureProjectImage();
+        $rows = $this->db->table('projects')
             ->where('tenant_id', $tenantId)
             ->where('deleted_at', null)
             ->orderBy('name', 'ASC')
             ->get()
             ->getResultArray();
+
+        foreach ($rows as &$row) {
+            $row['image'] = $this->projectImageUrl($row);
+        }
+        unset($row);
+
+        return $rows;
     }
 
     /**
@@ -141,6 +149,7 @@ class SiteService
      */
     public function project(int $tenantId, int $id): ?array
     {
+        $this->ensureProjectImage();
         $row = $this->db->table('projects')
             ->where('tenant_id', $tenantId)
             ->where('id', $id)
@@ -148,7 +157,13 @@ class SiteService
             ->get()
             ->getRowArray();
 
-        return $row ?: null;
+        if ($row === null) {
+            return null;
+        }
+
+        $row['image'] = $this->projectImageUrl($row);
+
+        return $row;
     }
 
     /**
@@ -213,7 +228,82 @@ class SiteService
             throw new RuntimeException('Remove the plots in this project first.');
         }
 
+        $this->ensureProjectImage();
+        $row = $this->project($tenantId, $id);
         $this->db->table('projects')->where('id', $id)->update(['deleted_at' => date('Y-m-d H:i:s')]);
+
+        if ($row !== null) {
+            $this->unlinkProjectFile($tenantId, (string) ($row['image_stored'] ?? ''));
+        }
+    }
+
+    /**
+     * @return array{image: string}
+     */
+    public function saveProjectImage(int $tenantId, int $projectId, string $tempPath): array
+    {
+        $this->ensureProjectImage();
+        $project = $this->db->table('projects')
+            ->where('tenant_id', $tenantId)
+            ->where('id', $projectId)
+            ->where('deleted_at', null)
+            ->get()
+            ->getRowArray();
+
+        if ($project === null) {
+            throw new RuntimeException('That project is not in this workspace.');
+        }
+
+        $stored = $this->storeImageFile($tenantId, 'projects', $tempPath);
+        $this->unlinkProjectFile($tenantId, (string) ($project['image_stored'] ?? ''));
+        $this->db->table('projects')->where('id', $projectId)->update([
+            'image_stored' => $stored,
+            'updated_at'   => date('Y-m-d H:i:s'),
+        ]);
+
+        return ['image' => '/api/v1/projects/' . $projectId . '/image'];
+    }
+
+    public function deleteProjectImage(int $tenantId, int $projectId): void
+    {
+        $this->ensureProjectImage();
+        $project = $this->db->table('projects')
+            ->where('tenant_id', $tenantId)
+            ->where('id', $projectId)
+            ->where('deleted_at', null)
+            ->get()
+            ->getRowArray();
+
+        if ($project === null || (string) ($project['image_stored'] ?? '') === '') {
+            throw new RuntimeException('That project has no image.');
+        }
+
+        $this->unlinkProjectFile($tenantId, (string) $project['image_stored']);
+        $this->db->table('projects')->where('id', $projectId)->update([
+            'image_stored' => null,
+            'updated_at'   => date('Y-m-d H:i:s'),
+        ]);
+    }
+
+    public function projectImagePath(int $tenantId, int $projectId): ?string
+    {
+        $this->ensureProjectImage();
+        $project = $this->db->table('projects')
+            ->select('image_stored')
+            ->where('tenant_id', $tenantId)
+            ->where('id', $projectId)
+            ->where('deleted_at', null)
+            ->get()
+            ->getRowArray();
+        $stored = (string) ($project['image_stored'] ?? '');
+
+        if (! preg_match('/^[a-f0-9]{32}\.(png|jpg|webp|gif)$/', $stored)) {
+            return null;
+        }
+
+        $path = WRITEPATH . 'uploads' . DIRECTORY_SEPARATOR . $tenantId . DIRECTORY_SEPARATOR . 'projects' . DIRECTORY_SEPARATOR . $stored;
+
+        return is_file($path) ? $path : null;
     }
 
     /**
@@ -500,6 +590,79 @@ class SiteService
         return is_file($path) ? $path : null;
     }
 
+    private function ensureProjectImage(): void
+    {
+        if (! $this->db->tableExists('projects') || $this->db->fieldExists('image_stored', 'projects')) {
+            return;
+        }
+
+        $tableName = str_replace('`', '', $this->db->prefixTable('projects'));
+        $this->db->query('ALTER TABLE `' . $tableName . '` ADD `image_stored` VARCHAR(80) NULL');
+        $this->db->resetDataCache();
+    }
+
+    /**
+     * @param array<string, mixed> $row
+     */
+    private function projectImageUrl(array $row): ?string
+    {
+        $stored = (string) ($row['image_stored'] ?? '');
+
+        if (! preg_match('/^[a-f0-9]{32}\.(png|jpg|webp|gif)$/', $stored)) {
+            return null;
+        }
+
+        return '/api/v1/projects/' . (int) $row['id'] . '/image';
+    }
+
+    private function storeImageFile(int $tenantId, string $folder, string $tempPath): string
+    {
+        $head = (string) file_get_contents($tempPath, false, null, 0, 16);
+        $ext = match (true) {
+            str_starts_with($head, "\x89PNG") => 'png',
+            str_starts_with($head, "\xFF\xD8\xFF") => 'jpg',
+            str_starts_with($head, 'GIF8') => 'gif',
+            str_starts_with($head, 'RIFF') && substr($head, 8, 4) === 'WEBP' => 'webp',
+            default => '',
+        };
+
+        if ($ext === '') {
+            throw new RuntimeException('Use a PNG, JPG, WebP, or GIF image.');
+        }
+
+        $size = filesize($tempPath);
+
+        if ($size === false || $size < 1 || $size > 8 * 1024 * 1024) {
+            throw new RuntimeException('Use an image up to 8 MB.');
+        }
+
+        $stored = bin2hex(random_bytes(16)) . '.' . $ext;
+        $dir = WRITEPATH . 'uploads' . DIRECTORY_SEPARATOR . $tenantId . DIRECTORY_SEPARATOR . $folder;
+
+        if (! is_dir($dir) && ! mkdir($dir, 0755, true) && ! is_dir($dir)) {
+            throw new RuntimeException('The file store is not available.');
+        }
+
+        if (! copy($tempPath, $dir . DIRECTORY_SEPARATOR . $stored)) {
+            throw new RuntimeException('The image was not saved.');
+        }
+
+        return $stored;
+    }
+
+    private function unlinkProjectFile(int $tenantId, string $stored): void
+    {
+        if (! preg_match('/^[a-f0-9]{32}\.(png|jpg|webp|gif)$/', $stored)) {
+            return;
+        }
+
+        $path = WRITEPATH . 'uploads' . DIRECTORY_SEPARATOR . $tenantId . DIRECTORY_SEPARATOR . 'projects' . DIRECTORY_SEPARATOR . $stored;
+
+        if (is_file($path)) {
+            unlink($path);
+        }
+    }
+
     private function ensurePlotImages(): void
     {
         if ($this->db->tableExists('plot_images')) {
@@ -738,6 +901,8 @@ class SiteService
             throw new RuntimeException('Choose a lead stage.');
         }
 
+        (new EstateService($this->db))->assertCatalogValue($tenantId, 'lead_stage', $stage);
+
         $status = $this->leadStatus($stage, (string) ($existing['status'] ?? ''));
         $this->db->table('leads')->where('id', $id)->update([
             'lead_stage' => $stage,
@@ -855,20 +1020,77 @@ class SiteService
             throw new RuntimeException('That lead is not in this workspace.');
         }
 
-        $rows = $this->db->table('lead_deals')
-            ->where('tenant_id', $tenantId)
-            ->where('lead_id', $leadId)
-            ->where('deleted_at', null)
-            ->orderBy('id', 'DESC')
-            ->get()
-            ->getResultArray();
+        $this->ensureWorkflowColumns();
 
-        foreach ($rows as &$row) {
-            $decoded = json_decode((string) ($row['project_details'] ?? ''), true);
-            $row['project_details'] = is_array($decoded) ? $decoded : [];
+        return $this->dealRows($tenantId, $leadId);
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    public function allDeals(int $tenantId): array
+    {
+        $this->ensureWorkflowColumns();
+
+        return $this->dealRows($tenantId, null);
+    }
+
+    public function approveLead(int $tenantId, int $id, int $userId): void
+    {
+        $this->ensureWorkflowColumns();
+        $lead = $this->lead($tenantId, $id);
+
+        if ($lead === null) {
+            throw new RuntimeException('That lead is not in this workspace.');
         }
 
-        return $rows;
+        $now = date('Y-m-d H:i:s');
+        $this->db->table('leads')->where('id', $id)->update([
+            'approval_status' => 'approved',
+            'approved_by'     => $userId,
+            'approved_at'     => $now,
+            'updated_at'      => $now,
+        ]);
+    }
+
+    public function approveDeal(int $tenantId, int $id, int $userId): array
+    {
+        $this->ensureWorkflowColumns();
+        $row = $this->db->table('lead_deals')
+            ->where('tenant_id', $tenantId)
+            ->where('id', $id)
+            ->where('deleted_at', null)
+            ->get()
+            ->getRowArray();
+
+        if ($row === null) {
+            throw new RuntimeException('That deal is not in this workspace.');
+        }
+
+        $requested = strtoupper(trim((string) ($row['requested_stage'] ?? '')));
+        $now = date('Y-m-d H:i:s');
+        $update = [
+            'approval_status' => 'approved',
+            'approved_by'     => $userId,
+            'approved_at'     => $now,
+            'updated_at'      => $now,
+            'requested_stage' => null,
+        ];
+
+        if (in_array($requested, ['BOOKING', 'REGISTERED'], true)) {
+            $update['deal_stage'] = $requested;
+        }
+
+        $this->db->table('lead_deals')->where('id', $id)->update($update);
+        $rows = $this->dealRows($tenantId, (int) $row['lead_id']);
+
+        foreach ($rows as $deal) {
+            if ((int) $deal['id'] === $id) {
+                return $deal;
+            }
+        }
+
+        throw new RuntimeException('That deal is not in this workspace.');
     }
 
     /**
@@ -876,6 +1098,8 @@ class SiteService
      */
     public function saveDeal(int $tenantId, int $leadId, int $userId, array $input): int
     {
+        $this->ensureWorkflowColumns();
+
         if ($this->lead($tenantId, $leadId) === null) {
             throw new RuntimeException('That lead is not in this workspace.');
         }
@@ -886,6 +1110,15 @@ class SiteService
         if (! in_array($stage, $stages, true)) {
             throw new RuntimeException('Choose a deal stage.');
         }
+
+        $plotId = (int) ($input['plotId'] ?? $input['plot_id'] ?? 0);
+        $plot = $plotId > 0 ? $this->plot($tenantId, $plotId) : null;
+
+        if ($plot === null) {
+            throw new RuntimeException('Choose the plot for this deal.');
+        }
+
+        $gated = in_array($stage, ['BOOKING', 'REGISTERED'], true);
 
         $projects = $input['projectDetails'] ?? $input['project_details'] ?? [];
         $clean    = [];
@@ -912,11 +1145,24 @@ class SiteService
             }
         }
 
+        if ($clean === []) {
+            $plotProject = $this->project($tenantId, (int) $plot['project_id']);
+            $clean[] = [
+                'projectId'   => (int) $plot['project_id'],
+                'projectName' => $plotProject === null ? '' : (string) $plotProject['name'],
+                'amount'      => BookService::rupeesToMinor((string) ($input['totalDealValue'] ?? $input['total_deal_value'] ?? '0')),
+                'notes'       => trim((string) ($plot['plot_no'] ?? '')),
+            ];
+        }
+
         $now = date('Y-m-d H:i:s');
         $this->db->table('lead_deals')->insert([
             'tenant_id'                  => $tenantId,
             'lead_id'                    => $leadId,
-            'deal_stage'                 => $stage,
+            'plot_id'                    => $plotId,
+            'deal_stage'                 => $gated ? 'PROPOSAL_SUBMITTED' : $stage,
+            'requested_stage'            => $gated ? $stage : null,
+            'approval_status'            => 'pending',
             'deal_stage_description'     => $this->blank($input['dealStageDescription'] ?? $input['deal_stage_description'] ?? null),
             'total_deal_value'           => BookService::rupeesToMinor((string) ($input['totalDealValue'] ?? $input['total_deal_value'] ?? '0')),
             'deal_description'           => $this->blank($input['dealDescription'] ?? $input['deal_description'] ?? null),
@@ -981,7 +1227,10 @@ class SiteService
             throw new RuntimeException('Enter a valid email or leave it blank.');
         }
 
-        $stage  = trim((string) ($input['leadStage'] ?? $input['lead_stage'] ?? ''));
+        $this->ensureWorkflowColumns();
+        $lists = new EstateService($this->db);
+        $givenStage = trim((string) ($input['leadStage'] ?? $input['lead_stage'] ?? ''));
+        $stage  = $givenStage;
         $status = $this->leadStatus($stage, (string) ($input['status'] ?? ''));
 
         if ($stage === '') {
@@ -1003,8 +1252,8 @@ class SiteService
             throw new RuntimeException('That lead is not in this workspace.');
         }
 
-        if ($id === null && $assignedTo < 1) {
-            throw new RuntimeException('Choose who this lead is assigned to.');
+        if ($givenStage !== '') {
+            $lists->assertCatalogValue($tenantId, 'lead_stage', $givenStage);
         }
 
         if ($projectId > 0 && $this->project($tenantId, $projectId) === null) {
@@ -1053,6 +1302,13 @@ class SiteService
             $ownerId      = $headId > 0 ? $headId : $byUserId;
         }
 
+        $mayAssign = ! empty($input['may_assign']);
+        $alreadyApproved = $existing !== null && (string) ($existing['approval_status'] ?? 'approved') === 'approved';
+
+        if ($ownerId > 0 && ! $mayAssign && ! $alreadyApproved) {
+            throw new RuntimeException('A manager must approve this lead before it is assigned.');
+        }
+
         if ($ownerId > 0) {
             $previous = (int) ($existing['owner_id'] ?? 0);
 
@@ -1079,6 +1335,15 @@ class SiteService
 
         $budgetRaw = (string) ($input['clientBudgetValue'] ?? $input['client_budget_value'] ?? $input['budget'] ?? '');
         $source    = $this->blank($input['leadSource'] ?? $input['lead_source'] ?? $input['source'] ?? null);
+        $campaign  = $this->blank($input['campaignSource'] ?? $input['campaign_source'] ?? null);
+
+        if ($source !== null) {
+            $lists->assertCatalogValue($tenantId, 'lead_source', $source);
+        }
+
+        if ($campaign !== null) {
+            $lists->assertCatalogValue($tenantId, 'campaign_source', $campaign);
+        }
         $alternate = $this->blank($input['alternatePhoneNumber'] ?? $input['alternate_phone_number'] ?? $input['phone_secondary'] ?? null);
         $notes     = $this->blank($input['description'] ?? $input['notes'] ?? null);
         $now       = date('Y-m-d H:i:s');
@@ -1101,7 +1366,7 @@ class SiteService
             'group_id'               => $teamId > 0 ? $teamId : null,
             'source'                 => $source,
             'lead_source'            => $source,
-            'campaign_source'        => $this->blank($input['campaignSource'] ?? $input['campaign_source'] ?? null),
+            'campaign_source'        => $campaign,
             'project_id'             => $projectId > 0 ? $projectId : null,
             'project_name'           => $projectName,
             'plot_id'                => $plotId > 0 ? $plotId : null,
@@ -1130,10 +1395,19 @@ class SiteService
             'updated_at'             => $now,
         ];
 
+        if ($id !== null && $ownerId > 0 && $mayAssign && ! $alreadyApproved) {
+            $data['approval_status'] = 'approved';
+            $data['approved_by']     = $byUserId > 0 ? $byUserId : null;
+            $data['approved_at']     = $now;
+        }
+
         if ($id === null) {
-            $data['tenant_id']   = $tenantId;
-            $data['inserted_by'] = $byUserId > 0 ? $byUserId : null;
-            $data['created_at']  = $now;
+            $data['tenant_id']        = $tenantId;
+            $data['inserted_by']      = $byUserId > 0 ? $byUserId : null;
+            $data['created_at']       = $now;
+            $data['approval_status']  = ($ownerId > 0 && $mayAssign) ? 'approved' : 'pending';
+            $data['approved_by']      = $data['approval_status'] === 'approved' ? ($byUserId > 0 ? $byUserId : null) : null;
+            $data['approved_at']      = $data['approval_status'] === 'approved' ? $now : null;
             $this->db->table('leads')->insert($data);
             $saved = (int) $this->db->insertID();
 
@@ -1191,10 +1465,15 @@ class SiteService
 
     public function transfer(int $tenantId, int $leadId, int $toUserId, int $byUserId, string $note): void
     {
+        $this->ensureWorkflowColumns();
         $lead = $this->lead($tenantId, $leadId);
 
         if ($lead === null) {
             throw new RuntimeException('That lead is not in this workspace.');
+        }
+
+        if ((string) ($lead['approval_status'] ?? 'approved') !== 'approved') {
+            throw new RuntimeException('A manager must approve this lead before it is assigned.');
         }
 
         if (! in_array($toUserId, $this->memberIds($tenantId), true)) {
@@ -1282,6 +1561,8 @@ class SiteService
             throw new RuntimeException('A call needs a subject and a purpose.');
         }
 
+        (new EstateService($this->db))->assertCatalogValue($tenantId, 'followup_purpose', $purpose);
+
         if (strlen($subject) > 30) {
             throw new RuntimeException('Subject must be 30 characters or less.');
         }
@@ -1332,8 +1613,11 @@ class SiteService
         return (int) $this->db->insertID();
     }
 
-    public function completeFollowup(int $tenantId, int $id): void
+    public function completeFollowup(int $tenantId, int $id, string $feedback, string $experience): void
     {
+        $this->ensureWorkflowColumns();
+        (new EstateService($this->db))->assertCatalogValue($tenantId, 'call_feedback', $feedback);
+        $experience = $this->experienceWord($experience);
         $row = $this->db->table('followups')
             ->where('tenant_id', $tenantId)
             ->where('id', $id)
@@ -1355,6 +1639,8 @@ class SiteService
             'completed_date' => $now,
             'status'         => 'done',
             'current_state'  => 'COMPLETED',
+            'call_feedback'  => $feedback,
+            'experience'     => $experience,
         ]);
     }
 
@@ -1595,8 +1881,11 @@ class SiteService
         return (int) $this->db->insertID();
     }
 
-    public function completeVisit(int $tenantId, int $id): void
+    public function completeVisit(int $tenantId, int $id, string $feedback, string $experience, string $note = ''): void
     {
+        $this->ensureWorkflowColumns();
+        (new EstateService($this->db))->assertCatalogValue($tenantId, 'visit_feedback', $feedback);
+        $experience = $this->experienceWord($experience);
         $visit = $this->visitRow($tenantId, $id);
         $now = date('Y-m-d H:i:s');
         $this->db->table('site_visits')->where('id', (int) $visit['id'])->update([
@@ -1605,6 +1894,9 @@ class SiteService
             'completed_date' => $now,
             'attended_at'    => $now,
             'updated_at'     => $now,
+            'visit_feedback' => $feedback,
+            'experience'     => $experience,
+            'visit_note'     => trim($note) !== '' ? trim($note) : null,
         ]);
     }
 
@@ -2306,5 +2598,80 @@ class SiteService
         $stamp = strtotime($value);
 
         return $stamp === false ? $value : date('d M Y, H:i', $stamp);
+    }
+
+    private function ensureWorkflowColumns(): void
+    {
+        static $ready = false;
+
+        if ($ready) {
+            return;
+        }
+
+        $ready = true;
+        $this->addColumn('leads', 'approval_status', "VARCHAR(16) NOT NULL DEFAULT 'approved'");
+        $this->addColumn('leads', 'approved_by', 'INT UNSIGNED NULL');
+        $this->addColumn('leads', 'approved_at', 'DATETIME NULL');
+        $this->addColumn('followups', 'call_feedback', 'VARCHAR(80) NULL');
+        $this->addColumn('followups', 'experience', 'VARCHAR(16) NULL');
+        $this->addColumn('site_visits', 'visit_feedback', 'VARCHAR(80) NULL');
+        $this->addColumn('site_visits', 'experience', 'VARCHAR(16) NULL');
+        $this->addColumn('site_visits', 'visit_note', 'TEXT NULL');
+        $this->addColumn('lead_deals', 'plot_id', 'INT UNSIGNED NULL');
+        $this->addColumn('lead_deals', 'approval_status', "VARCHAR(16) NOT NULL DEFAULT 'approved'");
+        $this->addColumn('lead_deals', 'requested_stage', 'VARCHAR(40) NULL');
+        $this->addColumn('lead_deals', 'approved_by', 'INT UNSIGNED NULL');
+        $this->addColumn('lead_deals', 'approved_at', 'DATETIME NULL');
+    }
+
+    private function addColumn(string $table, string $column, string $definition): void
+    {
+        if (! $this->db->tableExists($table) || $this->db->fieldExists($column, $table)) {
+            return;
+        }
+
+        $tableName = str_replace('`', '', $this->db->prefixTable($table));
+        $this->db->query('ALTER TABLE `' . $tableName . '` ADD `' . str_replace('`', '', $column) . '` ' . $definition);
+        $this->db->resetDataCache();
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    private function dealRows(int $tenantId, ?int $leadId): array
+    {
+        $builder = $this->db->table('lead_deals d')
+            ->select('d.*, p.plot_no, p.block, l.name AS lead_name, pr.name AS project_name')
+            ->join('plots p', 'p.id = d.plot_id AND p.deleted_at IS NULL', 'left')
+            ->join('leads l', 'l.id = d.lead_id AND l.deleted_at IS NULL', 'left')
+            ->join('projects pr', 'pr.id = p.project_id AND pr.deleted_at IS NULL', 'left')
+            ->where('d.tenant_id', $tenantId)
+            ->where('d.deleted_at', null)
+            ->orderBy('d.id', 'DESC');
+
+        if ($leadId !== null) {
+            $builder->where('d.lead_id', $leadId);
+        }
+
+        $rows = $builder->get()->getResultArray();
+
+        foreach ($rows as &$row) {
+            $decoded = json_decode((string) ($row['project_details'] ?? ''), true);
+            $row['project_details'] = is_array($decoded) ? $decoded : [];
+            $row['plot_label'] = trim((string) ($row['block'] ?? '') . ' ' . (string) ($row['plot_no'] ?? ''));
+        }
+
+        return $rows;
+    }
+
+    private function experienceWord(string $value): string
+    {
+        $value = trim($value);
+
+        if (! in_array($value, ['Poor', 'Fair', 'Good', 'Excellent'], true)) {
+            throw new RuntimeException('Choose the overall experience.');
+        }
+
+        return $value;
     }
 }

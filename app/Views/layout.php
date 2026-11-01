@@ -34,6 +34,14 @@
             ['attendance', 'Attendance', 'user-check', 'attendance.view', 'app/attendance'],
             ['incentives', 'Incentives', 'receipt', 'incentives.view', 'app/incentives'],
         ],
+        'Masters' => [
+            ['campaign-sources', 'Campaign source', 'file-text', 'masters.view', 'desk/index.html#campaign-sources'],
+            ['lead-sources', 'Lead source', 'contact', 'masters.view', 'desk/index.html#lead-sources'],
+            ['lead-stages', 'Lead stage', 'kanban', 'masters.view', 'desk/index.html#lead-stages'],
+            ['followup-purposes', 'Follow-up purpose', 'clipboard-list', 'masters.view', 'desk/index.html#followup-purposes'],
+            ['call-feedback', 'Call feedback', 'phone', 'masters.view', 'desk/index.html#call-feedback'],
+            ['visit-feedback', 'Visit feedback', 'map-pin', 'masters.view', 'desk/index.html#visit-feedback'],
+        ],
         'Insight' => [
             ['reports', 'Reports', 'chart-column', 'reports.view', 'app/reports'],
             ['desk', 'React desk', 'layout-dashboard', null, 'desk/index.html'],
@@ -72,7 +80,14 @@
             <div class="nav-label"><?= esc($label) ?></div>
             <nav>
                 <?php foreach ($visible as [$id, $text, $iconName, $permission, $href]) : ?>
-                    <a class="<?= ($active ?? '') === $id ? 'active' : '' ?>" href="<?= site_url($href) ?>">
+                    <?php
+                        $hash = '';
+                        if (str_contains($href, '#')) {
+                            [$href, $hash] = explode('#', $href, 2);
+                            $hash = '#' . $hash;
+                        }
+                    ?>
+                    <a class="<?= ($active ?? '') === $id ? 'active' : '' ?>" href="<?= site_url($href) . $hash ?>">
                         <?= icon($iconName) ?>
                         <span><?= esc($text) ?></span>
                     </a>

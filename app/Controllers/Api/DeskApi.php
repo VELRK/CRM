@@ -342,6 +342,7 @@ class DeskApi extends BaseController
 
     public function me(): ResponseInterface
     {
+        $this->estate->ensureWorkflowAccess();
         $actor = $this->actor();
         $isOwner = (bool) $actor['is_owner'];
 
@@ -505,6 +506,70 @@ class DeskApi extends BaseController
 
             return $this->ok(['id' => $projectId]);
         });
+    }
+
+    public function saveProjectImage(int $id): ResponseInterface
+    {
+        if ($denied = $this->guardAny(['projects.create', 'projects.update'])) {
+            return $denied;
+        }
+
+        return $this->run(function () use ($id) {
+            if (! $this->projectAllowed($id) || $this->sites->project($this->tenant(), $id) === null) {
+                return $this->fail('That project is not in this workspace.', 404);
+            }
+
+            $file = $this->request->getFile('image');
+
+            if ($file === null || ! $file->isValid()) {
+                throw new RuntimeException('Choose an image.');
+            }
+
+            return $this->ok($this->sites->saveProjectImage($this->tenant(), $id, $file->getTempName()));
+        });
+    }
+
+    public function deleteProjectImage(int $id): ResponseInterface
+    {
+        if ($denied = $this->guard('projects.update')) {
+            return $denied;
+        }
+
+        return $this->run(function () use ($id) {
+            if (! $this->projectAllowed($id)) {
+                return $this->fail('That project is not in this workspace.', 404);
+            }
+
+            $this->sites->deleteProjectImage($this->tenant(), $id);
+
+            return $this->ok(['id' => $id, 'deleted' => true]);
+        });
+    }
+
+    public function projectImage(int $id): ResponseInterface
+    {
+        if ($denied = $this->guard('projects.view')) {
+            return $denied;
+        }
+
+        if (! $this->projectAllowed($id)) {
+            return $this->fail('That project is not in this workspace.', 404);
+        }
+
+        $path = $this->sites->projectImagePath($this->tenant(), $id);
+
+        if ($path === null) {
+            return $this->fail('That project has no image.', 404);
+        }
+
+        $mime = match (strtolower(pathinfo($path, PATHINFO_EXTENSION))) {
+            'png' => 'image/png',
+            'webp' => 'image/webp',
+            'gif' => 'image/gif',
+            default => 'image/jpeg',
+        };
+
+        return $this->response->setHeader('Content-Type', $mime)->setHeader('Cache-Control', 'private, max-age=60')->setBody((string) file_get_contents($path));
     }
 
     public function deleteProject(int $id): ResponseInterface
@@ -814,7 +879,7 @@ class DeskApi extends BaseController
 
     public function catalogList(string $kind): ResponseInterface
     {
-        if ($denied = $this->guard('leads.view')) {
+        if ($denied = $this->guardAny(['masters.view', 'leads.view', 'followups.view', 'visits.view', 'deals.view'])) {
             return $denied;
         }
 
@@ -826,7 +891,7 @@ class DeskApi extends BaseController
 
     public function catalogSave(string $kind, ?int $id = null): ResponseInterface
     {
-        if ($denied = $this->guard('leads.update')) {
+        if ($denied = $this->guard('masters.manage')) {
             return $denied;
         }
 
@@ -837,7 +902,7 @@ class DeskApi extends BaseController
 
     public function catalogDelete(string $kind, int $id): ResponseInterface
     {
-        if ($denied = $this->guard('leads.update')) {
+        if ($denied = $this->guard('masters.manage')) {
             return $denied;
         }
 
@@ -874,7 +939,7 @@ class DeskApi extends BaseController
 
         $lead = $this->sites->lead($this->tenant(), $id);
 
-        if ($lead === null || $this->outsideTeam($lead, ['owner_id'])) {
+        if ($lead === null || $this->outsideTeam($lead, ['owner_id'], true)) {
             return $this->fail('That lead is not in this workspace.', 404);
         }
 
@@ -897,7 +962,7 @@ class DeskApi extends BaseController
 
         $lead = $this->sites->lead($this->tenant(), (int) $row['id']);
 
-        if ($lead === null || $this->outsideTeam($lead, ['owner_id'])) {
+        if ($lead === null || $this->outsideTeam($lead, ['owner_id'], true)) {
             return $this->ok(['duplicate' => false, 'lead' => null]);
         }
 
@@ -921,6 +986,11 @@ class DeskApi extends BaseController
         return $this->run(function () use ($id) {
             $input = $this->input();
             $input['by_user_id'] = $this->user();
+            unset($input['may_assign'], $input['approval_status'], $input['approved_by']);
+
+            if ($this->allows('leads.approve')) {
+                $input['may_assign'] = 1;
+            }
 
             try {
                 $saved = $this->sites->saveLead($this->tenant(), $id, $input);
@@ -1010,7 +1080,7 @@ class DeskApi extends BaseController
 
     public function saveNote(int $id): ResponseInterface
     {
-        if ($denied = $this->guard('leads.update')) {
+        if ($denied = $this->guardAny(['leads.update', 'visits.attend'])) {
             return $denied;
         }
 
@@ -1057,7 +1127,7 @@ class DeskApi extends BaseController
 
     public function saveDeal(int $id): ResponseInterface
     {
-        if ($denied = $this->guard('leads.update')) {
+        if ($denied = $this->guardAny(['deals.create', 'leads.update'])) {
             return $denied;
         }
 
@@ -1068,7 +1138,54 @@ class DeskApi extends BaseController
         return $this->run(function () use ($id) {
             $saved = $this->sites->saveDeal($this->tenant(), $id, $this->user(), $this->input());
 
-            return $this->ok(['id' => $saved]);
+            return $this->ok(['id' => $saved, 'approval_status' => 'pending']);
+        });
+    }
+
+    public function approveLead(int $id): ResponseInterface
+    {
+        if ($denied = $this->guard('leads.approve')) {
+            return $denied;
+        }
+
+        if ($blocked = $this->leadGate($id)) {
+            return $blocked;
+        }
+
+        return $this->run(function () use ($id) {
+            $this->sites->approveLead($this->tenant(), $id, $this->user());
+
+            return $this->ok($this->sites->lead($this->tenant(), $id));
+        });
+    }
+
+    public function deals(): ResponseInterface
+    {
+        if ($denied = $this->guard('deals.view')) {
+            return $denied;
+        }
+
+        return $this->ok($this->sites->allDeals($this->tenant()));
+    }
+
+    public function approveDeal(int $id): ResponseInterface
+    {
+        if ($denied = $this->guard('deals.approve')) {
+            return $denied;
+        }
+
+        $deal = db_connect()->table('lead_deals')->where('tenant_id', $this->tenant())->where('id', $id)->where('deleted_at', null)->get()->getRowArray();
+
+        if ($deal === null) {
+            return $this->fail('That deal is not in this workspace.', 404);
+        }
+
+        if ($blocked = $this->leadGate((int) $deal['lead_id'])) {
+            return $blocked;
+        }
+
+        return $this->run(function () use ($id) {
+            return $this->ok($this->sites->approveDeal($this->tenant(), $id, $this->user()));
         });
     }
 
@@ -1080,7 +1197,7 @@ class DeskApi extends BaseController
 
         $lead = $this->sites->lead($this->tenant(), $id);
 
-        if ($lead === null || $this->outsideTeam($lead, ['owner_id'])) {
+        if ($lead === null || $this->outsideTeam($lead, ['owner_id'], true)) {
             return $this->fail('That lead is not in this workspace.', 404);
         }
 
@@ -1093,7 +1210,7 @@ class DeskApi extends BaseController
             return $denied;
         }
 
-        if ($blocked = $this->leadGate($id)) {
+        if ($blocked = $this->leadGate($id, true)) {
             return $blocked;
         }
 
@@ -1118,7 +1235,7 @@ class DeskApi extends BaseController
             $ids = array_map('intval', is_array($input['lead_ids'] ?? null) ? $input['lead_ids'] : []);
 
             foreach ($ids as $leadId) {
-                if ($blocked = $this->leadGate((int) $leadId)) {
+                if ($blocked = $this->leadGate((int) $leadId, true)) {
                     return $blocked;
                 }
             }
@@ -1228,7 +1345,13 @@ class DeskApi extends BaseController
         }
 
         return $this->run(function () use ($id) {
-            $this->sites->completeFollowup($this->tenant(), $id);
+            $input = $this->input();
+            $this->sites->completeFollowup(
+                $this->tenant(),
+                $id,
+                (string) ($input['callFeedback'] ?? $input['feedback'] ?? ''),
+                (string) ($input['experience'] ?? '')
+            );
 
             return $this->ok(['id' => $id, 'status' => 'COMPLETED']);
         });
@@ -1327,7 +1450,14 @@ class DeskApi extends BaseController
         }
 
         return $this->run(function () use ($id) {
-            $this->sites->completeVisit($this->tenant(), $id);
+            $input = $this->input();
+            $this->sites->completeVisit(
+                $this->tenant(),
+                $id,
+                (string) ($input['visitFeedback'] ?? $input['feedback'] ?? ''),
+                (string) ($input['experience'] ?? ''),
+                (string) ($input['visitNote'] ?? $input['note'] ?? '')
+            );
 
             return $this->ok(['id' => $id, 'status' => 'COMPLETED']);
         });
@@ -2548,22 +2678,50 @@ class DeskApi extends BaseController
         return trim((string) ($row['name'] ?? ''));
     }
 
-    private function leadGate(int $id): ?ResponseInterface
+    private function collaboratorSees(array $row, array $keys, bool $assignPool): bool
+    {
+        $me = $this->user();
+
+        if (in_array('owner_id', $keys, true)) {
+            $owner = (int) ($row['owner_id'] ?? 0);
+
+            if ($owner === $me) {
+                return true;
+            }
+
+            return $assignPool && $owner === 0 && (string) ($row['approval_status'] ?? '') === 'approved';
+        }
+
+        foreach ($keys as $key) {
+            if ((int) ($row[$key] ?? 0) === $me) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function leadGate(int $id, bool $assignPool = false): ?ResponseInterface
     {
         $lead = $this->sites->lead($this->tenant(), $id);
 
-        if ($lead === null || $this->outsideTeam($lead, ['owner_id'])) {
+        if ($lead === null || $this->outsideTeam($lead, ['owner_id'], $assignPool)) {
             return $this->fail('That lead is not in this workspace.', 404);
         }
 
         return null;
     }
 
-    private function outsideTeam(array $row, array $keys): bool
+    private function outsideTeam(array $row, array $keys, bool $assignPool = false): bool
     {
         $scope = $this->viewScope();
+        $level = (string) ($scope['level'] ?? '');
 
-        if (($scope['level'] ?? '') !== 'team') {
+        if ($level === 'collaborator') {
+            return ! $this->collaboratorSees($row, $keys, $assignPool);
+        }
+
+        if ($level !== 'team') {
             return false;
         }
 
@@ -2599,7 +2757,13 @@ class DeskApi extends BaseController
     {
         $scope = $this->viewScope();
 
-        if (($scope['level'] ?? '') !== 'team') {
+        $level = (string) ($scope['level'] ?? '');
+
+        if ($level === 'collaborator') {
+            return array_values(array_filter($rows, fn (array $row): bool => $this->collaboratorSees($row, $keys, in_array('owner_id', $keys, true))));
+        }
+
+        if ($level !== 'team') {
             return $rows;
         }
 

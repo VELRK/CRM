@@ -29,13 +29,21 @@ const screenAccess = {
     activity: 'team.view',
     whatsapp: 'leads.view',
     settings: 'workspace.settings',
+    deals: 'deals.view',
+    'campaign-sources': 'masters.view',
+    'lead-sources': 'masters.view',
+    'lead-stages': 'masters.view',
+    'followup-purposes': 'masters.view',
+    'call-feedback': 'masters.view',
+    'visit-feedback': 'masters.view',
 };
 
 const nav = [
     ['Menu', [['CRM', 'home'], ['Reports', 'reports']]],
+    ['Masters', [['Campaign source', 'campaign-sources'], ['Lead source', 'lead-sources'], ['Lead stage', 'lead-stages'], ['Follow-up purpose', 'followup-purposes'], ['Call feedback', 'call-feedback'], ['Visit feedback', 'visit-feedback']]],
     ['People', [['Staff', 'staff'], ['Roles', 'roles'], ['Teams', 'teams']]],
     ['Sites', [['Projects', 'projects']]],
-    ['Sales', [['Leads', 'leads'], ['Follow-ups', 'followups'], ['Visits', 'visits'], ['Tasks', 'tasks']]],
+    ['Sales', [['Leads', 'leads'], ['Deals', 'deals'], ['Follow-ups', 'followups'], ['Visits', 'visits'], ['Tasks', 'tasks']]],
     ['Office', [['Attendance', 'attendance'], ['Locations', 'locations'], ['Incentives', 'incentives']]],
     ['Insight', [['Activity', 'activity'], ['Notifications', 'notifications'], ['WhatsApp', 'whatsapp'], ['API console', 'api']]],
 ];
@@ -59,6 +67,13 @@ const lists = {
     activity: { path: '/api/v1/activity', lede: 'What changed in this workspace.', columns: [col('When', 'created_at'), col('Person', 'user_name'), col('Action', 'action'), col('Record', 'subject_type'), col('Id', 'subject_id'), col('Detail', 'detail')] },
     notifications: { path: '/api/v1/notifications', lede: 'Messages for this sign-in.', columns: [col('Title', 'title'), col('Message', 'body'), col('Type', 'kind'), col('Read', 'read_at')] },
     whatsapp: { path: '/api/v1/whatsapp/templates', lede: 'Message templates stored for this workspace.', columns: [col('Name', 'name'), col('Language', 'language'), col('Message', 'body')], actions: ['template'] },
+    deals: { path: '/api/v1/deals', kind: 'deals', lede: 'Every deal is listed here. A team manager approves it before it is final, and booking or registration waits for that approval.', columns: [] },
+    'campaign-sources': { path: '/api/v1/campaign-sources', kind: 'master', lede: 'Campaigns used when a lead is added.' },
+    'lead-sources': { path: '/api/v1/lead-sources', kind: 'master', lede: 'Where a lead came from.' },
+    'lead-stages': { path: '/api/v1/lead-stages', kind: 'master', lede: 'Stages a lead can move through.' },
+    'followup-purposes': { path: '/api/v1/followup-purposes', kind: 'master', lede: 'Why a follow-up is scheduled.' },
+    'call-feedback': { path: '/api/v1/call-feedback', kind: 'master', lede: 'Outcome recorded when a follow-up is completed.' },
+    'visit-feedback': { path: '/api/v1/visit-feedback', kind: 'master', lede: 'Outcome recorded when a visit is completed.' },
 };
 
 const pendingWrites = new Map();
@@ -456,11 +471,18 @@ function LeadForm({ lead, onDone, onClose }) {
     const [people, setPeople] = useState([]);
     const [teams, setTeams] = useState([]);
     const [projects, setProjects] = useState([]);
+    const [stages, setStages] = useState([]);
+    const [sources, setSources] = useState([]);
+    const [campaigns, setCampaigns] = useState([]);
     const [error, setError] = useState('');
     useEffect(() => {
         call('/api/v1/staff').then((rows) => setPeople(Array.isArray(rows) ? rows : [])).catch(() => {});
         call('/api/v1/teams').then((rows) => setTeams(Array.isArray(rows) ? rows : [])).catch(() => {});
         call('/api/v1/projects').then((rows) => setProjects(Array.isArray(rows) ? rows : [])).catch(() => {});
+        const names = (path, apply) => call(path).then((rows) => apply((Array.isArray(rows) ? rows : []).filter((row) => row.active !== false).map((row) => row.name))).catch(() => {});
+        names('/api/v1/lead-stages?active=1', setStages);
+        names('/api/v1/lead-sources?active=1', setSources);
+        names('/api/v1/campaign-sources?active=1', setCampaigns);
     }, []);
     const assignees = form.assignedType === 'GROUP'
         ? teams.map((row) => [String(row.id), row.name])
@@ -471,7 +493,6 @@ function LeadForm({ lead, onDone, onClose }) {
     async function submit(event) {
         event.preventDefault();
         if (!form.clientFirstName?.trim()) return setError('Please enter first name');
-        if (!form.assignedTo) return setError('Please select assigned to');
         if (!form.leadStage) return setError('Please select lead stage');
         if (!digits(form.phoneNumber)) return setError('Please enter phone number');
         if (digits(form.phoneNumber).length !== 10) return setError('Phone number must be 10 digits');
@@ -480,13 +501,15 @@ function LeadForm({ lead, onDone, onClose }) {
         setError('');
         try {
             const path = lead?.id ? '/api/v1/leads/' + lead.id : '/api/v1/leads';
-            await call(path, { method: 'POST', body: { ...form, assignedTo: Number(form.assignedTo), projectId: Number(form.projectId || 0), clientBudgetValue: form.clientBudgetValue ? Number(form.clientBudgetValue) : 0 } });
+            await call(path, { method: 'POST', body: { ...form, assignedTo: form.assignedTo ? Number(form.assignedTo) : 0, projectId: Number(form.projectId || 0), clientBudgetValue: form.clientBudgetValue ? Number(form.clientBudgetValue) : 0 } });
             onDone();
         } catch (e) { setError(e.message); }
     }
-    const stages = ['New', 'Qualified', 'Follow Up', 'Proposal Sent', 'Site Visit Scheduled', 'Negotiation', 'Booked', 'Lost'];
-    const sources = ['Website', 'Facebook', 'Instagram', 'Email Campaign', 'Portal', 'Event', 'Referral', 'Walk-in', 'WhatsApp'];
     const properties = ['Plot', 'Villa/Bungalow', 'Farm Land', 'Apartment/Flat', 'Agricultural Land', 'Industrial Land', 'Other'];
+    const keep = (list, current) => current && !list.includes(current) ? [current, ...list] : list;
+    const stageOptions = keep(stages, form.leadStage);
+    const sourceOptions = keep(sources, form.leadSource);
+    const campaignOptions = keep(campaigns, form.campaignSource);
     return sheet(lead?.id ? 'Edit Lead' : 'Add Lead', error, submit, onClose, html`
         <h3>Lead Information</h3>
         <div class="xcrm-grid">
@@ -495,15 +518,15 @@ function LeadForm({ lead, onDone, onClose }) {
                 ${xrow('First name', html`<div class="name-pair">${selectOf(form, 'clientNamePrefix', setForm, [['Mr.', 'Mr.'], ['Mrs.', 'Mrs.'], ['Ms.', 'Ms.'], ['Dr.', 'Dr.']])}${inputOf(form, 'clientFirstName', setForm)}</div>`, true)}
                 ${xrow('Phone number', html`<input inputMode="numeric" maxlength="10" placeholder="Enter phone number" value=${form.phoneNumber || ''} onInput=${(event) => setPhone('phoneNumber', event)} />`, true)}
                 ${xrow('Email', inputOf(form, 'email', setForm, 'email'))}
-                ${xrow('Lead source', selectOf(form, 'leadSource', setForm, [['', 'Select lead source'], ...sources.map((item) => [item, item])]))}
+                ${xrow('Lead source', selectOf(form, 'leadSource', setForm, [['', 'Select lead source'], ...sourceOptions.map((item) => [item, item])]))}
                 ${xrow('Project enquiry', selectOf(form, 'projectId', setForm, [['', 'Select project'], ...projects.map((row) => [String(row.id), row.name])]))}
             </div>
             <div>
-                ${xrow('Assigned to', selectOf(form, 'assignedTo', setForm, [['', 'Select assigned to'], ...assignees]), true)}
+                ${xrow('Assigned to', html`${selectOf(form, 'assignedTo', setForm, [['', 'Assign after approval'], ...assignees])}<small class="hint">A manager approves the lead before it can be assigned.</small>`)}
                 ${xrow('Last name', inputOf(form, 'clientLastName', setForm))}
                 ${xrow('Mobile', html`<input inputMode="numeric" maxlength="10" placeholder="Enter mobile number" value=${form.alternatePhoneNumber || ''} onInput=${(event) => setPhone('alternatePhoneNumber', event)} />`)}
-                ${xrow('Lead stage', selectOf(form, 'leadStage', setForm, stages.map((item) => [item, item])), true)}
-                ${xrow('Campaign source', selectOf(form, 'campaignSource', setForm, [['', 'Select campaign source'], ...sources.map((item) => [item, item])]))}
+                ${xrow('Lead stage', selectOf(form, 'leadStage', setForm, stageOptions.map((item) => [item, item])), true)}
+                ${xrow('Campaign source', selectOf(form, 'campaignSource', setForm, [['', 'Select campaign source'], ...campaignOptions.map((item) => [item, item])]))}
             </div>
         </div>
         <h3>Address Information</h3>
@@ -547,12 +570,13 @@ function FollowForm({ leadId, leadName, onDone, onClose }) {
     const [form, setForm] = useState({ leadId: leadId ? String(leadId) : '', callPurpose: '' });
     const [leads, setLeads] = useState([]);
     const [people, setPeople] = useState([]);
+    const [purposes, setPurposes] = useState([]);
     const [error, setError] = useState('');
     useEffect(() => {
         if (!locked) call('/api/v1/leads').then((rows) => setLeads(Array.isArray(rows) ? rows : [])).catch(() => {});
         call('/api/v1/staff').then((rows) => setPeople(Array.isArray(rows) ? rows : [])).catch(() => {});
+        call('/api/v1/followup-purposes?active=1').then((rows) => setPurposes((Array.isArray(rows) ? rows : []).map((row) => row.name))).catch(() => {});
     }, []);
-    const purposes = ['Introduction', 'Follow up', 'Site visit reminder', 'Negotiation', 'Closure'];
     async function submit(event) {
         event.preventDefault();
         const chosen = locked ? String(leadId) : form.leadId;
@@ -840,6 +864,34 @@ function FilterDialog({ title, draft, setDraft, activity, stages, sources, proje
         </form>
     </div>`;
 }
+const EXPERIENCE = ['Excellent', 'Good', 'Fair', 'Poor'];
+function FeedbackBox({ kind, onClose, onSave }) {
+    const path = kind === 'visits' ? '/api/v1/visit-feedback?active=1' : '/api/v1/call-feedback?active=1';
+    const [items, setItems] = useState([]);
+    const [feedback, setFeedback] = useState('');
+    const [experience, setExperience] = useState('');
+    const [note, setNote] = useState('');
+    const [error, setError] = useState('');
+    useEffect(() => { call(path).then((rows) => setItems(Array.isArray(rows) ? rows : [])).catch((e) => setError(e.message)); }, [path]);
+    async function submit(event) {
+        event.preventDefault();
+        if (!feedback) return setError('Choose a feedback.');
+        if (!experience) return setError('Choose the overall experience.');
+        setError('');
+        try { await onSave({ feedback, experience, visitNote: note }); }
+        catch (e) { setError(e.message); }
+    }
+    return html`<div class="modal-back" onClick=${onClose}><form class="filter-box" onClick=${(event) => event.stopPropagation()} onSubmit=${submit}>
+        <header><h2>${kind === 'visits' ? 'Complete visit' : 'Complete follow-up'}</h2><button class="filter-x" type="button" onClick=${onClose}>×</button></header>
+        <div class="filter-body">
+            ${error ? html`<p class="error">${error}</p>` : null}
+            <label>${kind === 'visits' ? 'Visit feedback' : 'Call feedback'}<select value=${feedback} onChange=${(event) => setFeedback(event.target.value)}><option value="">Select</option>${items.map((row) => html`<option key=${row.id} value=${row.name}>${row.name}</option>`)}</select></label>
+            <label>Overall experience<select value=${experience} onChange=${(event) => setExperience(event.target.value)}><option value="">Select</option>${EXPERIENCE.map((item) => html`<option key=${item} value=${item}>${item}</option>`)}</select></label>
+            ${kind === 'visits' ? html`<label>Visit note<textarea value=${note} onInput=${(event) => setNote(event.target.value)}></textarea></label>` : null}
+        </div>
+        <footer><button class="ghost" type="button" onClick=${onClose}>Cancel</button><button class="primary" type="submit">Save</button></footer>
+    </form></div>`;
+}
 function Board({ kind, title, rows, onReload, onRow, onOpen, onEdit, onDelete, active, user }) {
     const [text, setText] = useState('');
     const [filters, setFilters] = useState(blankFilter);
@@ -849,6 +901,7 @@ function Board({ kind, title, rows, onReload, onRow, onOpen, onEdit, onDelete, a
     const [error, setError] = useState('');
     const [move, setMove] = useState(null);
     const [when, setWhen] = useState('');
+    const [feedbackRow, setFeedbackRow] = useState(null);
     const activity = kind !== 'leads';
     const counts = { SCHEDULED: 0, COMPLETED: 0, OVERDUE: 0, CANCELLED: 0 };
     rows.forEach((row) => { const key = String(row.display_status || '').toUpperCase(); if (counts[key] != null) counts[key] += 1; });
@@ -890,11 +943,17 @@ function Board({ kind, title, rows, onReload, onRow, onOpen, onEdit, onDelete, a
     const base = kind === 'calls' ? '/api/v1/followups/' : kind === 'visits' ? '/api/v1/visits/' : '/api/v1/tasks/';
     async function done(row, event) {
         event.stopPropagation();
+        if (kind === 'calls' || kind === 'visits') { setFeedbackRow(row); return; }
         setError('');
         setBusy(row.id);
         try { await call(base + row.id + '/done', { method: 'POST', body: {} }); onReload(); }
         catch (e) { setError(e.message); }
         setBusy(0);
+    }
+    async function saveFeedback(body) {
+        await call(base + feedbackRow.id + '/done', { method: 'POST', body });
+        setFeedbackRow(null);
+        onReload();
     }
     async function reschedule(event) {
         event.preventDefault();
@@ -967,6 +1026,7 @@ function Board({ kind, title, rows, onReload, onRow, onOpen, onEdit, onDelete, a
                 </div>
             </form>
         </div>` : null}
+        ${feedbackRow ? html`<${FeedbackBox} kind=${kind} onClose=${() => setFeedbackRow(null)} onSave=${saveFeedback} />` : null}
         <div class="table-card"><table class="board-table">
             <thead><tr>
                 ${kind === 'leads' ? html`<th>Lead name</th><th>Phone no</th><th>Project</th><th>Assigned to</th><th>Lead stage</th><th>Lead source</th><th>Modified date</th><th>Created on</th>${onEdit || onDelete ? html`<th></th>` : null}` : null}
@@ -1022,7 +1082,6 @@ function Board({ kind, title, rows, onReload, onRow, onOpen, onEdit, onDelete, a
         </table></div>
     </article>`;
 }
-const LEAD_STAGES = ['New', 'Qualified', 'Follow Up', 'Proposal Sent', 'Site Visit Scheduled', 'Negotiation', 'Booked', 'Lost'];
 const DEAL_STAGES = [['PROPOSAL_SUBMITTED', 'Proposal submitted'], ['NEGOTIATION', 'Negotiation'], ['BOOKING', 'Booking'], ['BOOKING_CANCELLED', 'Booking cancelled'], ['REGISTERED', 'Registered']];
 function dealLabel(value) {
     return (DEAL_STAGES.find((item) => item[0] === value) || [value, value])[1];
@@ -1047,7 +1106,10 @@ function LeadPage({ leadId, onBack, user }) {
     const [noteSort, setNoteSort] = useState('new');
     const [tab, setTab] = useState('followups');
     const [menu, setMenu] = useState(false);
-    const [deal, setDeal] = useState({ dealStage: 'PROPOSAL_SUBMITTED', totalDealValue: '', projectId: '', amount: '', dealDescription: '' });
+    const [deal, setDeal] = useState({ dealStage: 'PROPOSAL_SUBMITTED', totalDealValue: '', projectId: '', plotId: '', amount: '', dealDescription: '' });
+    const [plots, setPlots] = useState([]);
+    const [stages, setStages] = useState([]);
+    const [feedbackRow, setFeedbackRow] = useState(null);
     const [history, setHistory] = useState([]);
     const loadTick = useRef(0);
     const safe = (path) => call(path).catch(() => []);
@@ -1059,6 +1121,8 @@ function LeadPage({ leadId, onBack, user }) {
         safe('/api/v1/leads/' + leadId + '/notes').then(keep(setNotes, (rows) => Array.isArray(rows) ? rows : []));
         safe('/api/v1/leads/' + leadId + '/deals').then(keep(setDeals, (rows) => Array.isArray(rows) ? rows : []));
         safe('/api/v1/projects').then(keep(setProjects, (rows) => Array.isArray(rows) ? rows : []));
+        safe('/api/v1/plots').then(keep(setPlots, (rows) => Array.isArray(rows) ? rows : []));
+        safe('/api/v1/lead-stages?active=1').then(keep(setStages, (rows) => (Array.isArray(rows) ? rows : []).map((row) => row.name)));
         safe('/api/v1/followups').then(keep(setCalls, mine));
         safe('/api/v1/visits').then(keep(setVisits, mine));
         safe('/api/v1/tasks').then(keep(setTasks, mine));
@@ -1118,26 +1182,46 @@ function LeadPage({ leadId, onBack, user }) {
     async function saveDeal(event) {
         event.preventDefault();
         if (!deal.dealStage) { setError('Choose a deal stage.'); return; }
+        if (!deal.plotId) { setError('Choose the plot for this deal.'); return; }
         setError('');
         const projectDetails = deal.projectId ? [{ projectId: Number(deal.projectId), amount: Number(deal.amount || deal.totalDealValue || 0) }] : [];
         try {
             await call('/api/v1/leads/' + leadId + '/deals', { method: 'POST', body: { ...deal, totalDealValue: Number(deal.totalDealValue || 0), projectDetails } });
-            setDeal({ dealStage: 'PROPOSAL_SUBMITTED', totalDealValue: '', projectId: '', amount: '', dealDescription: '' });
+            setDeal({ dealStage: 'PROPOSAL_SUBMITTED', totalDealValue: '', projectId: '', plotId: '', amount: '', dealDescription: '' });
             setEditor('');
             load();
         } catch (e) { setError(e.message); }
     }
     async function finish(kind, row) {
-        const base = kind === 'followups' ? '/api/v1/followups/' : kind === 'visits' ? '/api/v1/visits/' : '/api/v1/tasks/';
+        if (kind === 'followups' || kind === 'visits') { setFeedbackRow({ kind, row }); return; }
         setError('');
-        try { await call(base + row.id + '/done', { method: 'POST', body: {} }); load(); }
+        try { await call('/api/v1/tasks/' + row.id + '/done', { method: 'POST', body: {} }); load(); }
+        catch (e) { setError(e.message); }
+    }
+    async function saveFeedback(body) {
+        const base = feedbackRow.kind === 'visits' ? '/api/v1/visits/' : '/api/v1/followups/';
+        await call(base + feedbackRow.row.id + '/done', { method: 'POST', body });
+        setFeedbackRow(null);
+        load();
+    }
+    async function approveLead() {
+        setError('');
+        try { setLead(await call('/api/v1/leads/' + leadId + '/approve', { method: 'POST', body: {} })); }
+        catch (e) { setError(e.message); }
+    }
+    async function approveDeal(id) {
+        setError('');
+        try { await call('/api/v1/deals/' + id + '/approve', { method: 'POST', body: {} }); load(); }
         catch (e) { setError(e.message); }
     }
     const canEdit = allows(user, 'leads.update');
+    const canApprove = allows(user, 'leads.approve');
+    const canApproveDeal = allows(user, 'deals.approve');
+    const canNote = canEdit || allows(user, 'visits.attend');
     const canWhatsapp = allows(user, 'whatsapp.manage');
     const canFollow = allows(user, 'followups.create');
     const canVisit = allows(user, 'visits.create');
-    const canTask = allows(user, 'followups.create');
+    const canTask = allows(user, 'followups.create') && canEdit;
     const canFinish = tab === 'visits' ? allows(user, 'visits.attend') : allows(user, 'followups.create');
     const activityRows = tab === 'followups' ? openCalls : tab === 'visits' ? openVisits : openTasks;
     return html`<div class="lead-page">
@@ -1155,7 +1239,9 @@ function LeadPage({ leadId, onBack, user }) {
                 <div>
                     <h2>${lead.name || 'Unnamed lead'}</h2>
                     <p>Assigned to <b>${owner}</b> (${lead.assigned_type || 'USER'})</p>
+                    ${lead.approval_status === 'pending' ? html`<p class="hint">Waiting for a manager to approve this lead before it is assigned.</p>` : null}
                 </div>
+                ${canApprove && lead.approval_status === 'pending' ? html`<button type="button" class="primary" onClick=${approveLead}>Approve lead</button>` : null}
                 ${canWhatsapp ? html`<button type="button" class="ghost" onClick=${() => setEditor('whatsapp')}>Send WhatsApp</button>` : null}
                 ${canEdit ? html`<button type="button" class="act act-edit" aria-label="Edit lead" title="Edit" onClick=${() => setEditor('lead')}>
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/></svg>
@@ -1212,7 +1298,7 @@ function LeadPage({ leadId, onBack, user }) {
                 </section>
                 <section class="lead-card">
                     <div class="card-head"><h3>Deals</h3>${canEdit ? html`<button type="button" class="add-round" onClick=${() => setEditor('deal')}><i>+</i> Add Deal</button>` : null}</div>
-                    ${deals.length === 0 ? html`<div class="empty-deal"><svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#c5c9d1" stroke-width="1.4"><path d="M8 4h8l2 3v13H6V7l2-3z"/><path d="M9 12h6M9 16h6"/></svg></div>` : html`<div class="deal-list">${deals.map((row) => html`<article key=${row.id}><strong>${dealLabel(row.deal_stage)}</strong><span>${money(row.total_deal_value)}</span><p>${(row.project_details || []).map((item) => item.projectName).filter(Boolean).join(', ') || row.deal_description || '—'}</p></article>`)}</div>`}
+                    ${deals.length === 0 ? html`<div class="empty-deal"><svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#c5c9d1" stroke-width="1.4"><path d="M8 4h8l2 3v13H6V7l2-3z"/><path d="M9 12h6M9 16h6"/></svg></div>` : html`<div class="deal-list">${deals.map((row) => html`<article key=${row.id}><strong>${dealLabel(row.requested_stage || row.deal_stage)}</strong><span>${money(row.total_deal_value)}</span><p>${row.plot_label || row.plot_no || 'No plot'} · ${row.approval_status === 'approved' ? 'Approved' : 'Waiting for the team manager'}${row.requested_stage ? ' · ' + dealLabel(row.requested_stage) + ' after approval' : ''}</p>${canApproveDeal && row.approval_status !== 'approved' ? html`<button type="button" class="ghost" onClick=${() => approveDeal(row.id)}>Approve</button>` : null}</article>`)}</div>`}
                 </section>
             </div>` : null}
             ${section === 'notes' ? html`<section class="lead-card">
@@ -1221,7 +1307,7 @@ function LeadPage({ leadId, onBack, user }) {
                 </div>
                 ${shownNotes.length === 0 ? html`<p class="empty-line">No notes yet</p>` : shownNotes.map((row) => html`<article class="note" key=${row.id}><header><strong>${row.note_heading}</strong>${canEdit ? actIcon('delete', 'Delete', () => setNoteConfirm(row)) : null}</header><p>${row.note_content}</p><small>${row.user_name || 'Staff'} · ${prettyWhen(row.created_at)}</small></article>`)}
                 ${noteConfirm ? confirmDelete(noteConfirm.note_heading || 'this note', error, removeNote, () => { setNoteConfirm(null); setError(''); }) : null}
-                ${canEdit ? html`<form class="note-box" onSubmit=${saveNote}>
+                ${canNote ? html`<form class="note-box" onSubmit=${saveNote}>
                     <input placeholder="Note title" value=${note.noteHeading} onInput=${(event) => setNote({ ...note, noteHeading: event.target.value })} />
                     <textarea placeholder="Add a note..." value=${note.noteContent} onInput=${(event) => setNote({ ...note, noteContent: event.target.value })}></textarea>
                     <div><button class="ghost" type="button" onClick=${() => setNote({ noteHeading: '', noteContent: '' })}>Cancel</button><button class="primary" type="submit">Save</button></div>
@@ -1255,7 +1341,7 @@ function LeadPage({ leadId, onBack, user }) {
         </div>
         ${stageOpen ? html`<div class="modal-back" onClick=${() => setStageOpen(false)}><form class="filter-box" onClick=${(event) => event.stopPropagation()} onSubmit=${saveStage}>
             <header><h2>Lead stage</h2><button class="filter-x" type="button" onClick=${() => setStageOpen(false)}>×</button></header>
-            <div class="filter-body"><label>Stage<select value=${stage} onChange=${(event) => setStage(event.target.value)}>${LEAD_STAGES.map((item) => html`<option key=${item} value=${item}>${item}</option>`)}</select></label></div>
+            <div class="filter-body"><label>Stage<select value=${stage} onChange=${(event) => setStage(event.target.value)}>${(stage && !stages.includes(stage) ? [stage, ...stages] : stages).map((item) => html`<option key=${item} value=${item}>${item}</option>`)}</select></label></div>
             <footer><button class="ghost" type="button" onClick=${() => setStageOpen(false)}>Cancel</button><button class="primary" type="submit">Save</button></footer>
         </form></div>` : null}
         ${editor === 'projects' ? html`<div class="modal-back" onClick=${() => setEditor('')}><form class="filter-box" onClick=${(event) => event.stopPropagation()} onSubmit=${saveProjects}>
@@ -1267,7 +1353,9 @@ function LeadPage({ leadId, onBack, user }) {
             ${xrow('Deal stage', html`<select value=${deal.dealStage} onChange=${(event) => setDeal({ ...deal, dealStage: event.target.value })}>${DEAL_STAGES.map(([value, label]) => html`<option key=${value} value=${value}>${label}</option>`)}</select>`, true)}
             ${xrow('Deal value', html`<input type="number" min="0" placeholder="Amount in rupees" value=${deal.totalDealValue} onInput=${(event) => setDeal({ ...deal, totalDealValue: event.target.value })} />`, true)}
             ${xrow('Project', html`<select value=${deal.projectId} onChange=${(event) => setDeal({ ...deal, projectId: event.target.value })}><option value="">Choose a project</option>${projects.map((row) => html`<option key=${row.id} value=${String(row.id)}>${row.name}</option>`)}</select>`)}
+            ${xrow('Plot', html`<select value=${deal.plotId} onChange=${(event) => setDeal({ ...deal, plotId: event.target.value })}><option value="">Choose a plot</option>${plots.map((row) => html`<option key=${row.id} value=${String(row.id)}>${row.project_name ? row.project_name + ' · ' : ''}${row.plot_no || row.id}</option>`)}</select>`, true)}
             ${xrow('Project amount', html`<input type="number" min="0" value=${deal.amount} onInput=${(event) => setDeal({ ...deal, amount: event.target.value })} />`)}
+            <p class="hint">The team manager approves this deal before it is final. Booking and registration stay on proposal until that approval.</p>
             ${xrow('Description', html`<textarea value=${deal.dealDescription} onInput=${(event) => setDeal({ ...deal, dealDescription: event.target.value })}></textarea>`, false, true)}
         `, true, 'Add') : null}
         ${editor === 'lead' ? html`<${LeadForm} lead=${lead} onDone=${() => { setEditor(''); load(); }} onClose=${() => setEditor('')} />` : null}
@@ -1275,6 +1363,7 @@ function LeadPage({ leadId, onBack, user }) {
         ${editor === 'visit' ? html`<${VisitForm} leadId=${leadId} leadName=${lead.name} onDone=${() => savedActivity('visits')} onClose=${() => setEditor('')} />` : null}
         ${editor === 'task' ? html`<${TaskForm} leadId=${leadId} leadName=${lead.name} onDone=${() => savedActivity('tasks')} onClose=${() => setEditor('')} />` : null}
         ${editor === 'whatsapp' ? html`<${SendWhatsApp} lead=${lead} onDone=${() => setEditor('')} onClose=${() => setEditor('')} />` : null}
+        ${feedbackRow ? html`<${FeedbackBox} kind=${feedbackRow.kind === 'visits' ? 'visits' : 'calls'} onClose=${() => setFeedbackRow(null)} onSave=${saveFeedback} />` : null}
     </div>`;
 }
 const PLOT_LABEL = { available: 'Available', advance: 'Advance', booked: 'Booked', sold: 'Sold', owner_use: 'Owner use', future: 'Future', registered: 'Registered', hold: 'Hold', blocked: 'Blocked' };
@@ -1306,6 +1395,9 @@ function ProjectForm({ project, onDone, onClose }) {
         total_plots: project?.total_plots ? String(project.total_plots) : '',
         launch_on: String(project?.launch_on || '').slice(0, 10),
     });
+    const [file, setFile] = useState(null);
+    const [preview, setPreview] = useState('');
+    const [savedId, setSavedId] = useState(project?.id || 0);
     const [error, setError] = useState('');
     useEffect(() => {
         call('/api/v1/company').then((row) => {
@@ -1334,8 +1426,15 @@ function ProjectForm({ project, onDone, onClose }) {
             } else {
                 body.attendance_location_id = mode === 'existing' ? Number(placeId || 0) : 0;
             }
-            const path = project?.id ? '/api/v1/projects/' + project.id : '/api/v1/projects';
-            await call(path, { method: 'POST', body });
+            let id = savedId;
+            if (!id) {
+                const saved = await call('/api/v1/projects', { method: 'POST', body });
+                id = saved.id;
+                setSavedId(id);
+            } else {
+                await call('/api/v1/projects/' + id, { method: 'POST', body });
+            }
+            if (file) await uploadProjectImage(id, file);
             onDone();
         } catch (e) { setError(e.message); }
     }
@@ -1348,6 +1447,14 @@ function ProjectForm({ project, onDone, onClose }) {
         ${field('Type', inputOf(form, 'project_type', setForm))}
         ${field('Total plots', inputOf(form, 'total_plots', setForm, 'number'))}
         ${field('Launch date', inputOf(form, 'launch_on', setForm, 'date'))}
+        ${field('Project image', html`<input type="file" accept="image/png,image/jpeg,image/webp,image/gif,.png,.jpg,.jpeg,.webp,.gif" onChange=${(event) => {
+            const chosen = event.target.files && event.target.files[0] ? event.target.files[0] : null;
+            if (preview) URL.revokeObjectURL(preview);
+            setFile(chosen);
+            setPreview(chosen ? URL.createObjectURL(chosen) : '');
+        }} />`)}
+        ${preview ? html`<img class="project-cover" src=${preview} alt="" />` : project?.image ? html`<${AuthImage} cover=${true} src=${project.image} />` : null}
+        <p class="hint">PNG, JPG, WebP, or GIF, up to 8 MB.</p>
         ${field('Attendance location', html`<select value=${mode === 'existing' ? placeId : mode} onChange=${(event) => {
             const value = event.target.value;
             if (value === 'none' || value === 'new') { setMode(value); setPlaceId(''); return; }
@@ -1487,6 +1594,7 @@ function SitesBoard({ start, user }) {
                 <div class="card-head"><div><h3>Available plots</h3><p>Plots currently marked available${selected ? ' · ' + selected.name : ''}.</p></div><button class="linkish" type="button" onClick=${() => setTab('available')}>View all available plots</button></div>
                 <div class="avail-card">
                     <div>
+                        ${selected?.image ? html`<${AuthImage} cover=${true} src=${selected.image} />` : null}
                         <strong>${selected ? selected.name : 'All projects'}</strong>
                         <p>Phase ${phase}</p>
                         <div class="facing-pills">${Object.keys(faces).length === 0 ? html`<span>No available plots</span>` : Object.entries(faces).map(([name, item]) => html`<div key=${name}><b>${name}</b><strong>${item.count}</strong><em>${Math.round(item.area).toLocaleString('en-IN')} sq.ft.</em></div>`)}</div>
@@ -1701,6 +1809,17 @@ function BookingForm({ plot, people, onDone, onClose }) {
         ${xrow('Remarks', html`<textarea value=${form.remarks} onInput=${set('remarks')}></textarea>`, false, true)}
     `, true, 'Save');
 }
+async function uploadProjectImage(projectId, file) {
+    const headers = { Accept: 'application/json' };
+    const token = localStorage.getItem(tokenKey);
+    if (token) headers.Authorization = 'Bearer ' + token;
+    const body = new FormData();
+    body.append('image', file);
+    const response = await fetch(apiPath('/api/v1/projects/' + projectId + '/image'), { method: 'POST', headers, body });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || payload.ok === false) throw new Error(payload.error || 'The image was not saved.');
+    return payload.data;
+}
 async function uploadPlotImage(plotId, file) {
     const headers = { Accept: 'application/json' };
     const token = localStorage.getItem(tokenKey);
@@ -1744,7 +1863,7 @@ function PlotForm({ projects, onDone, onClose }) {
         ${xrow('Images', html`<input type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple onChange=${(event) => setFiles([...(event.target.files || [])])} />`, false)}
     `, true, 'Add');
 }
-function AuthImage({ src }) {
+function AuthImage({ src, cover = false }) {
     const [url, setUrl] = useState('');
     useEffect(() => {
         let objectUrl = '';
@@ -1760,7 +1879,7 @@ function AuthImage({ src }) {
             .catch(() => {});
         return () => { gone = true; if (objectUrl) URL.revokeObjectURL(objectUrl); };
     }, [src]);
-    return url ? html`<img src=${url} alt="" />` : html`<span class="muted">…</span>`;
+    return url ? html`<img class=${cover ? 'project-cover' : ''} src=${url} alt="" />` : html`<span class="muted">…</span>`;
 }
 function PlotImages({ plot, canEdit, onDone, onClose }) {
     const [images, setImages] = useState(plot.images || []);
@@ -3566,11 +3685,86 @@ function PushBoard() {
         </tbody></table>`}</section>` : null}</div>` : null}
     </section>`;
 }
+function MasterBoard({ title, spec, user }) {
+    const [rows, setRows] = useState([]);
+    const [name, setName] = useState('');
+    const [editing, setEditing] = useState(null);
+    const [error, setError] = useState('');
+    const canWrite = allows(user, 'masters.manage');
+    function load() { call(spec.path).then((list) => setRows(Array.isArray(list) ? list : [])).catch((e) => setError(e.message)); }
+    useEffect(() => { load(); }, [spec.path]);
+    async function save(event) {
+        event.preventDefault();
+        const label = (editing ? editing.name : name).trim();
+        if (!label) return setError('Enter a name.');
+        setError('');
+        try {
+            await call(editing ? spec.path + '/' + editing.id : spec.path, { method: 'POST', body: { name: label, active: editing ? editing.active : true } });
+            setName('');
+            setEditing(null);
+            load();
+        } catch (e) { setError(e.message); }
+    }
+    async function remove(row) {
+        setError('');
+        try { await call(spec.path + '/' + row.id + '/delete', { method: 'POST', body: {} }); load(); }
+        catch (e) { setError(e.message); }
+    }
+    async function toggle(row) {
+        setError('');
+        try { await call(spec.path + '/' + row.id, { method: 'POST', body: { name: row.name, active: !row.active } }); load(); }
+        catch (e) { setError(e.message); }
+    }
+    return html`<section>
+        <p class="lede">${spec.lede}</p>
+        ${error ? html`<p class="error">${error}</p>` : null}
+        ${canWrite ? html`<form class="master-form" onSubmit=${save}>
+            <input value=${editing ? editing.name : name} placeholder=${'Add ' + title.toLowerCase()} onInput=${(event) => editing ? setEditing({ ...editing, name: event.target.value }) : setName(event.target.value)} />
+            <button class="primary" type="submit">${editing ? 'Save' : 'Add'}</button>
+            ${editing ? html`<button class="ghost" type="button" onClick=${() => setEditing(null)}>Cancel</button>` : null}
+        </form>` : null}
+        <div class="table-card"><table class="board-table">
+            <thead><tr><th>Name</th><th>Status</th>${canWrite ? html`<th></th>` : null}</tr></thead>
+            <tbody>${rows.map((row) => html`<tr key=${row.id}><td>${row.name}</td><td>${row.active ? 'Active' : 'Hidden'}</td>${canWrite ? html`<td class="row-actions"><button type="button" class="ghost" onClick=${() => setEditing({ ...row })}>Edit</button><button type="button" class="ghost" onClick=${() => toggle(row)}>${row.active ? 'Hide' : 'Show'}</button><button type="button" class="ghost" onClick=${() => remove(row)}>Delete</button></td>` : null}</tr>`)}</tbody>
+        </table></div>
+    </section>`;
+}
+function DealsBoard({ user }) {
+    const [rows, setRows] = useState([]);
+    const [error, setError] = useState('');
+    const canApprove = allows(user, 'deals.approve');
+    function load() { call('/api/v1/deals').then((list) => setRows(Array.isArray(list) ? list : [])).catch((e) => setError(e.message)); }
+    useEffect(() => { load(); }, []);
+    async function approve(row) {
+        setError('');
+        try { await call('/api/v1/deals/' + row.id + '/approve', { method: 'POST', body: {} }); load(); }
+        catch (e) { setError(e.message); }
+    }
+    return html`<section>
+        <p class="lede">Every deal in this workspace. Creation stays pending until the team manager approves it. Booking and registration move forward only after that approval.</p>
+        ${error ? html`<p class="error">${error}</p>` : null}
+        <div class="table-card"><table class="board-table">
+            <thead><tr><th>Lead</th><th>Plot</th><th>Stage</th><th>Value</th><th>Approval</th>${canApprove ? html`<th></th>` : null}</tr></thead>
+            <tbody>${rows.length === 0 ? html`<tr><td colspan="6">No deals yet</td></tr>` : rows.map((row) => html`<tr key=${row.id}>
+                <td>${row.lead_name || '—'}</td>
+                <td>${row.plot_label || row.plot_no || '—'}</td>
+                <td>${dealLabel(row.requested_stage || row.deal_stage)}</td>
+                <td>${money(row.total_deal_value)}</td>
+                <td>${row.approval_status === 'approved' ? 'Approved' : 'Waiting for the team manager'}</td>
+                ${canApprove && row.approval_status !== 'approved' ? html`<td><button type="button" class="ghost" onClick=${() => approve(row)}>Approve</button></td>` : canApprove ? html`<td></td>` : null}
+            </tr>`)}</tbody>
+        </table></div>
+    </section>`;
+}
 function App() {
     const [user, setUser] = useState(null);
     const [company, setCompany] = useState(null);
     const [ready, setReady] = useState(false);
-    const [screen, setScreen] = useState('home');
+    const [screen, setScreen] = useState(() => {
+        const id = location.hash.replace(/^#/, '');
+        const known = new Set(modules.map((item) => item[1]).concat(['settings']));
+        return known.has(id) ? id : 'home';
+    });
     const [setup, setSetup] = useState(() => new URLSearchParams(location.search).get('setup') || '');
     const [passwordOpen, setPasswordOpen] = useState(false);
     const [pushHelp, setPushHelp] = useState(false);
@@ -3578,6 +3772,19 @@ function App() {
     const fetchedLogo = useCompanyLogo(company?.logo ? (company.updatedDate || 'logo') : '');
     const logoUrl = fetchedLogo || (company?.logo !== false && window.__atriumLogo ? window.__atriumLogo : '');
     useEffect(() => { setPushHelp(false); }, [screen]);
+    useEffect(() => {
+        const next = screen === 'home' ? '' : '#' + screen;
+        if ((location.hash || '') !== next) history.replaceState(null, '', location.pathname + location.search + next);
+    }, [screen]);
+    useEffect(() => {
+        const onHash = () => {
+            const id = location.hash.replace(/^#/, '');
+            const known = new Set(modules.map((item) => item[1]).concat(['settings']));
+            setScreen(known.has(id) ? id : 'home');
+        };
+        window.addEventListener('hashchange', onHash);
+        return () => window.removeEventListener('hashchange', onHash);
+    }, []);
     useEffect(() => {
         if (!user) return;
         const key = screenAccess[screen];
@@ -3644,7 +3851,9 @@ function App() {
                 ${spec && spec.kind === 'attendance' ? html`<${AttendanceBoard} key="attendance" user=${user} />` : null}
                 ${spec && spec.kind === 'locations' ? html`<${LocationBoard} key="locations" />` : null}
                 ${spec && spec.kind === 'company' ? html`<${CompanyBoard} user=${user} onSaved=${async () => { setUser(await call('/api/v1/me')); setCompany(await call('/api/v1/company')); }} />` : null}
-                ${spec && screen !== 'notifications' && screen !== 'whatsapp' && spec.kind !== 'sites' && spec.kind !== 'attendance' && spec.kind !== 'locations' && spec.kind !== 'company' ? html`<${Resource} key=${screen} user=${user} title=${title} lede=${spec.lede} spec=${spec} />` : null}
+                ${spec && spec.kind === 'master' ? html`<${MasterBoard} key=${screen} user=${user} title=${title} spec=${spec} />` : null}
+                ${spec && spec.kind === 'deals' ? html`<${DealsBoard} key="deals" user=${user} />` : null}
+                ${spec && screen !== 'notifications' && screen !== 'whatsapp' && spec.kind !== 'sites' && spec.kind !== 'attendance' && spec.kind !== 'locations' && spec.kind !== 'company' && spec.kind !== 'master' && spec.kind !== 'deals' ? html`<${Resource} key=${screen} user=${user} title=${title} lede=${spec.lede} spec=${spec} />` : null}
                 ${passwordOpen ? html`<${ChangePassword} onClose=${() => setPasswordOpen(false)} />` : null}
                 ${pushHelp ? html`<${PushGuide} onClose=${() => setPushHelp(false)} />` : null}
             </main>

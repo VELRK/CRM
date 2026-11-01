@@ -39,6 +39,9 @@ $routes->group('api/v1', ['filter' => 'apiauth'], static function ($routes) {
 
     $routes->get('projects', 'Api\DeskApi::projects');
     $routes->post('projects', 'Api\DeskApi::saveProject');
+    $routes->post('projects/(:num)/image/delete', 'Api\DeskApi::deleteProjectImage/$1');
+    $routes->get('projects/(:num)/image', 'Api\DeskApi::projectImage/$1');
+    $routes->post('projects/(:num)/image', 'Api\DeskApi::saveProjectImage/$1');
     $routes->get('projects/(:num)/dashboard', 'Api\DeskApi::projectDashboard/$1');
     $routes->post('projects/(:num)/delete', 'Api\DeskApi::deleteProject/$1');
     $routes->post('projects/(:num)', 'Api\DeskApi::saveProject/$1');
@@ -71,6 +74,24 @@ $routes->group('api/v1', ['filter' => 'apiauth'], static function ($routes) {
     $routes->post('campaign-sources/(:num)', 'Api\DeskApi::catalogSave/campaign_source/$1');
     $routes->post('campaign-sources', 'Api\DeskApi::catalogSave/campaign_source');
 
+    $routes->get('followup-purposes', 'Api\DeskApi::catalogList/followup_purpose');
+    $routes->post('followup-purposes/(:num)/delete', 'Api\DeskApi::catalogDelete/followup_purpose/$1');
+    $routes->post('followup-purposes/(:num)', 'Api\DeskApi::catalogSave/followup_purpose/$1');
+    $routes->post('followup-purposes', 'Api\DeskApi::catalogSave/followup_purpose');
+
+    $routes->get('call-feedback', 'Api\DeskApi::catalogList/call_feedback');
+    $routes->post('call-feedback/(:num)/delete', 'Api\DeskApi::catalogDelete/call_feedback/$1');
+    $routes->post('call-feedback/(:num)', 'Api\DeskApi::catalogSave/call_feedback/$1');
+    $routes->post('call-feedback', 'Api\DeskApi::catalogSave/call_feedback');
+
+    $routes->get('visit-feedback', 'Api\DeskApi::catalogList/visit_feedback');
+    $routes->post('visit-feedback/(:num)/delete', 'Api\DeskApi::catalogDelete/visit_feedback/$1');
+    $routes->post('visit-feedback/(:num)', 'Api\DeskApi::catalogSave/visit_feedback/$1');
+    $routes->post('visit-feedback', 'Api\DeskApi::catalogSave/visit_feedback');
+
+    $routes->get('deals', 'Api\DeskApi::deals');
+    $routes->post('deals/(:num)/approve', 'Api\DeskApi::approveDeal/$1');
+
     $routes->get('leads/export', 'Api\DeskApi::exportLeads');
     $routes->get('leads/filter', 'Api\DeskApi::filterLeads');
     $routes->post('leads/filter', 'Api\DeskApi::filterLeads');
@@ -87,6 +108,7 @@ $routes->group('api/v1', ['filter' => 'apiauth'], static function ($routes) {
     $routes->get('leads/(:num)/deals', 'Api\DeskApi::leadDeals/$1');
     $routes->post('leads/(:num)/deals', 'Api\DeskApi::saveDeal/$1');
     $routes->post('leads/(:num)/transfer', 'Api\DeskApi::transfer/$1');
+    $routes->post('leads/(:num)/approve', 'Api\DeskApi::approveLead/$1');
     $routes->post('leads/(:num)/whatsapp', 'Api\DeskApi::sendTemplate/$1');
     $routes->post('leads/(:num)/delete', 'Api\DeskApi::deleteLead/$1');
     $routes->get('leads/(:num)', 'Api\DeskApi::lead/$1');
