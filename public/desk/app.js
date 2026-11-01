@@ -2992,6 +2992,7 @@ function CompanyBoard({ onSaved, user }) {
     const [error, setError] = useState('');
     const [saved, setSaved] = useState('');
     const canSave = allows(user, 'workspace.settings');
+    const [token, setToken] = useState('');
     const logoUrl = useCompanyLogo(form?.logo ? form.updatedDate || 'logo' : '');
     useEffect(() => { call('/api/v1/company').then(setForm).catch((e) => setError(e.message)); }, []);
     const set = (key) => (event) => setForm({ ...form, [key]: event.target.value });
@@ -3001,8 +3002,9 @@ function CompanyBoard({ onSaved, user }) {
         setError('');
         setSaved('');
         try {
-            const data = await call('/api/v1/company', { method: 'POST', body: { companyName: form.companyName, companyAdminName: form.companyAdminName, companyAdminEmail: form.companyAdminEmail, phone: form.phone || '', address: form.address || '', attendanceLat: form.attendanceLat || '', attendanceLng: form.attendanceLng || '', attendanceKm: form.attendanceKm || '' } });
+            const data = await call('/api/v1/company', { method: 'POST', body: { companyName: form.companyName, companyAdminName: form.companyAdminName, companyAdminEmail: form.companyAdminEmail, phone: form.phone || '', address: form.address || '', attendanceLat: form.attendanceLat || '', attendanceLng: form.attendanceLng || '', attendanceKm: form.attendanceKm || '', whatsappPhone: form.whatsapp?.phone || '', whatsappToken: token, whatsappFollowup: form.whatsapp?.followup || '', whatsappVisit: form.whatsapp?.visit || '', whatsappTask: form.whatsapp?.task || '' } });
             setForm(data);
+            setToken('');
             setSaved('Settings saved.');
             if (onSaved) await onSaved();
         } catch (e) { setError(e.message); }
@@ -3048,6 +3050,37 @@ function CompanyBoard({ onSaved, user }) {
             ${field('Attendance longitude', html`<input value=${form.attendanceLng || ''} onInput=${set('attendanceLng')} placeholder="76.9558000" />`)}
             ${field('Attendance area (km)', html`<input type="number" min="0" max="100" step="0.1" value=${form.attendanceKm || ''} onInput=${set('attendanceKm')} placeholder="Leave empty to allow any place" />`)}
         </div>
+        <h3>WhatsApp</h3>
+        <p class="fine">${form.whatsapp?.tokenSaved ? 'AskEva token is saved. Leave the token box blank to keep it.' : 'No AskEva token is saved yet.'}</p>
+        <div class="form-grid">
+            ${field('Business number', html`<input value=${form.whatsapp?.phone || ''} onInput=${(event) => setForm({ ...form, whatsapp: { ...(form.whatsapp || {}), phone: event.target.value } })} />`)}
+            ${field('AskEva token', html`<input type="password" value=${token} autoComplete="off" placeholder="Leave blank to keep the saved token" onInput=${(event) => setToken(event.target.value)} />`)}
+            ${field('Follow-up reminder template', html`<input value=${form.whatsapp?.followup || ''} placeholder="Exact AskEva template name" onInput=${(event) => setForm({ ...form, whatsapp: { ...(form.whatsapp || {}), followup: event.target.value } })} />`)}
+            ${field('Visit reminder template', html`<input value=${form.whatsapp?.visit || ''} placeholder="Exact AskEva template name" onInput=${(event) => setForm({ ...form, whatsapp: { ...(form.whatsapp || {}), visit: event.target.value } })} />`)}
+            ${field('Task reminder template', html`<input value=${form.whatsapp?.task || ''} placeholder="Exact AskEva template name" onInput=${(event) => setForm({ ...form, whatsapp: { ...(form.whatsapp || {}), task: event.target.value } })} />`, true)}
+        </div>
+        <h3>Firebase</h3>
+        <p class="fine">${form.firebase?.connected ? (form.firebase.source === 'company' ? 'Saved for this company. ' : 'Using the server file. ') + 'Project ' + (form.firebase.project || '') + '. ' + (form.firebase.email || '') : 'Phone push is not connected. Upload the Firebase service account JSON.'}</p>
+        ${canSave ? html`<label class="field">Service account JSON<input type="file" accept="application/json,.json" onChange=${async (event) => {
+            const file = event.target.files && event.target.files[0];
+            event.target.value = '';
+            if (!file) return;
+            setError('');
+            setSaved('');
+            try {
+                const headers = { Accept: 'application/json' };
+                const savedToken = localStorage.getItem(tokenKey);
+                if (savedToken) headers.Authorization = 'Bearer ' + savedToken;
+                const body = new FormData();
+                body.append('account', file);
+                const response = await fetch(apiPath('/api/v1/company/firebase'), { method: 'POST', headers, body });
+                const payload = await response.json();
+                if (!response.ok || payload.ok === false) throw new Error(payload.error || 'Firebase was not saved.');
+                setForm(payload.data);
+                setSaved('Firebase saved.');
+                if (onSaved) await onSaved();
+            } catch (e) { setError(e.message); }
+        }} /></label>` : null}
         ${canSave ? html`<div class="row-actions"><button class="ghost" type="button" onClick=${async () => {
             setError('');
             try {
@@ -3676,7 +3709,7 @@ function PushBoard() {
             <article class="panel-card"><h3>Delivered to a phone</h3><strong>${summary.sent || 0}</strong></article>
             <article class="panel-card"><h3>Not delivered</h3><strong>${summary.failed || 0}</strong></article>
         </div>
-        <p class="lede">${options.push ? 'Phone delivery is connected.' : 'Phone delivery is not connected yet. People still get the notice in the app. Put the Firebase service account path in fcm.credentials.'}</p>
+        <p class="lede">${options.push ? 'Phone delivery is connected.' : 'Phone delivery is not connected yet. People still get the notice in the app. Upload the Firebase service account on Settings.'}</p>
         <div class="push-tabs">
             ${[['rules', 'Rules'], ['send', 'Send'], ['history', 'History']].map(([key, label]) => html`<button type="button" key=${key} class=${tab === key ? 'primary' : 'ghost'} onClick=${() => setTab(key)}>${label}</button>`)}
         </div>

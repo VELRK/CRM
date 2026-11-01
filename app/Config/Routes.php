@@ -26,6 +26,7 @@ $routes->group('api/v1', ['filter' => 'apiauth'], static function ($routes) {
     $routes->post('me/password', 'Api\DeskApi::changePassword');
     $routes->get('company', 'Api\DeskApi::company');
     $routes->post('company', 'Api\DeskApi::saveCompany');
+    $routes->post('company/firebase', 'Api\DeskApi::saveFirebase');
     $routes->get('company/logo', 'Api\DeskApi::companyLogo');
     $routes->post('company/logo', 'Api\DeskApi::saveLogo');
 

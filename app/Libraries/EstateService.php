@@ -1414,6 +1414,74 @@ class EstateService
         return $row['setting_value'] ?? null;
     }
 
+    /**
+     * @return array{phone: string, tokenSaved: bool, followup: string, visit: string, task: string}
+     */
+    public function whatsappSettings(int $tenantId): array
+    {
+        return [
+            'phone'      => (string) ($this->setting($tenantId, 'whatsapp_phone') ?? ''),
+            'tokenSaved' => trim((string) ($this->setting($tenantId, 'whatsapp_token') ?? '')) !== '',
+            'followup'   => (string) ($this->setting($tenantId, 'whatsapp_followup_reminder') ?? ''),
+            'visit'      => (string) ($this->setting($tenantId, 'whatsapp_visit_reminder') ?? ''),
+            'task'       => (string) ($this->setting($tenantId, 'whatsapp_task_reminder') ?? ''),
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $input
+     */
+    public function saveWhatsappSettings(int $tenantId, array $input): void
+    {
+        $this->saveNamed($tenantId, $input, ['whatsappPhone', 'whatsapp_phone'], 'whatsapp_phone', 20, 'The WhatsApp number is too long.');
+        $this->saveNamed($tenantId, $input, ['whatsappFollowup', 'whatsapp_followup_reminder'], 'whatsapp_followup_reminder', 80, 'Follow-up reminder template name is too long.');
+        $this->saveNamed($tenantId, $input, ['whatsappVisit', 'whatsapp_visit_reminder'], 'whatsapp_visit_reminder', 80, 'Visit reminder template name is too long.');
+        $this->saveNamed($tenantId, $input, ['whatsappTask', 'whatsapp_task_reminder'], 'whatsapp_task_reminder', 80, 'Task reminder template name is too long.');
+
+        foreach (['whatsappToken', 'whatsapp_token'] as $key) {
+            if (! array_key_exists($key, $input)) {
+                continue;
+            }
+
+            $token = trim((string) $input[$key]);
+
+            if ($token === '') {
+                return;
+            }
+
+            if (strlen($token) > 500) {
+                throw new RuntimeException('The AskEva token is too long.');
+            }
+
+            $this->saveSetting($tenantId, 'whatsapp_token', $token);
+
+            return;
+        }
+    }
+
+    /**
+     * @param array<string, mixed> $input
+     * @param list<string> $keys
+     */
+    private function saveNamed(int $tenantId, array $input, array $keys, string $setting, int $limit, string $error): void
+    {
+        foreach ($keys as $key) {
+            if (! array_key_exists($key, $input)) {
+                continue;
+            }
+
+            $value = trim((string) $input[$key]);
+
+            if (strlen($value) > $limit) {
+                throw new RuntimeException($error);
+            }
+
+            $this->saveSetting($tenantId, $setting, $value);
+
+            return;
+        }
+    }
+
     public function saveSetting(int $tenantId, string $key, string $value): void
     {
         $existing = $this->setting($tenantId, $key);

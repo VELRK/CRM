@@ -6,7 +6,7 @@
         <h1>Settings</h1>
     </div>
 </header>
-<form method="post" action="<?= site_url('app/settings') ?>" class="panel stack narrow">
+<form method="post" action="<?= site_url('app/settings') ?>" class="panel stack narrow" enctype="multipart/form-data">
     <?= csrf_field() ?>
     <label>Workspace name <input name="name" value="<?= esc($name) ?>" required></label>
     <div class="split">
@@ -24,6 +24,24 @@
             </select>
         </label>
     </div>
+    <h2>WhatsApp</h2>
+    <p class="lede">Messages go through AskEva. Leave the token blank to keep the one already saved. <?= ! empty($whatsapp['tokenSaved']) ? 'A token is saved.' : 'No token is saved yet.' ?></p>
+    <label>Business number <input name="whatsapp_phone" value="<?= esc($whatsapp['phone'] ?? '') ?>"></label>
+    <label>AskEva token <input name="whatsapp_token" type="password" placeholder="Leave blank to keep the saved token" autocomplete="off"></label>
+    <label>Follow-up reminder template <input name="whatsapp_followup_reminder" value="<?= esc($whatsapp['followup'] ?? '') ?>" placeholder="Exact AskEva template name"></label>
+    <label>Visit reminder template <input name="whatsapp_visit_reminder" value="<?= esc($whatsapp['visit'] ?? '') ?>" placeholder="Exact AskEva template name"></label>
+    <label>Task reminder template <input name="whatsapp_task_reminder" value="<?= esc($whatsapp['task'] ?? '') ?>" placeholder="Exact AskEva template name"></label>
+    <h2>Firebase</h2>
+    <p class="lede">
+        <?php if (($firebase['source'] ?? '') === 'company') : ?>
+            Saved for this company. Project <?= esc($firebase['project']) ?>. <?= esc($firebase['email']) ?>
+        <?php elseif (($firebase['source'] ?? '') === 'server') : ?>
+            Using the server file. Project <?= esc($firebase['project']) ?>. <?= esc($firebase['email']) ?>
+        <?php else : ?>
+            Phone push is not connected. Upload the Firebase service account JSON.
+        <?php endif; ?>
+    </p>
+    <label>Service account JSON <input type="file" name="account" accept="application/json,.json"></label>
     <button class="primary" type="submit"><?= icon('settings') ?> Save</button>
 </form>
 <?= $this->endSection() ?>

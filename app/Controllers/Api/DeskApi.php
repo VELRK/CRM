@@ -175,6 +175,37 @@ class DeskApi extends BaseController
                 'updated_at' => $now,
             ]);
             $this->estate->saveAttendanceArea($this->tenant(), $input);
+            $this->estate->saveWhatsappSettings($this->tenant(), $input);
+
+            return $this->ok($this->companyRow());
+        });
+    }
+
+    public function saveFirebase(): ResponseInterface
+    {
+        if ($denied = $this->guard('workspace.settings')) {
+            return $denied;
+        }
+
+        return $this->run(function () {
+            $file = $this->request->getFile('account');
+            $json = '';
+
+            if ($file !== null && $file->isValid()) {
+                if ((int) $file->getSize() < 1 || (int) $file->getSize() > 20 * 1024) {
+                    throw new RuntimeException('Use a Firebase service account file up to 20 KB.');
+                }
+
+                $json = (string) file_get_contents($file->getTempName());
+            } else {
+                $json = trim((string) ($this->input()['account'] ?? ''));
+            }
+
+            if (strlen($json) > 20000) {
+                throw new RuntimeException('Use a Firebase service account file up to 20 KB.');
+            }
+
+            $this->alerts()->saveFirebase($this->tenant(), $json);
 
             return $this->ok($this->companyRow());
         });
@@ -273,6 +304,8 @@ class DeskApi extends BaseController
             'attendanceLat'     => $area['lat'],
             'attendanceLng'     => $area['lng'],
             'attendanceKm'      => $area['km'] === '0' ? '' : $area['km'],
+            'whatsapp'          => $this->estate->whatsappSettings($this->tenant()),
+            'firebase'          => $this->alerts()->firebaseStatus($this->tenant()),
         ];
     }
 

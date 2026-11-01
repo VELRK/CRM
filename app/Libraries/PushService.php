@@ -27,6 +27,8 @@ class PushService
 
     private ?string $accessToken = null;
 
+    private ?string $accessEmail = null;
+
     public function __construct(private BaseConnection $db)
     {
     }
@@ -138,7 +140,7 @@ class PushService
 
         if (! $this->db->tableExists('notification_logs')) {
             foreach ($devices as $device) {
-                $this->sendFcm((string) $device['device_token'], $title, $message, [
+                $this->sendFcm($tenantId, (string) $device['device_token'], $title, $message, [
                     'event'        => $event,
                     'kind'         => 'text',
                     'subject_type' => $subjectType,
@@ -176,7 +178,7 @@ class PushService
         }
 
         foreach ($devices as $device) {
-            $result = $this->sendFcm((string) $device['device_token'], $title, $message, [
+            $result = $this->sendFcm($tenantId, (string) $device['device_token'], $title, $message, [
                 'event'        => $event,
                 'kind'         => 'text',
                 'subject_type' => $subjectType,
@@ -488,7 +490,7 @@ class PushService
             'roles'        => $roles,
             'designations' => $designations,
             'projects'     => $projects,
-            'push'         => $this->serviceAccount() !== null,
+            'push'         => $this->serviceAccount($tenantId) !== null,
         ];
     }
 
@@ -548,7 +550,7 @@ class PushService
             }
 
             foreach ($devices as $device) {
-                $result = $this->sendFcm((string) $device['device_token'], $title, $message, [
+                $result = $this->sendFcm($tenantId, (string) $device['device_token'], $title, $message, [
                     'event'        => $event,
                     'kind'         => $kind,
                     'media'        => $media,
@@ -972,9 +974,9 @@ class PushService
      * @param array<string, string> $data
      * @return array{ok: bool, id: ?string, error: ?string, drop: bool}
      */
-    private function sendFcm(string $token, string $title, string $body, array $data): array
+    private function sendFcm(int $tenantId, string $token, string $title, string $body, array $data): array
     {
-        $account = $this->serviceAccount();
+        $account = $this->serviceAccount($tenantId);
 
         if ($account === null) {
             return ['ok' => false, 'id' => null, 'error' => 'Push delivery is not connected.', 'drop' => false];
@@ -1017,7 +1019,9 @@ class PushService
      */
     private function googleToken(array $account): string
     {
-        if ($this->accessToken !== null) {
+        $email = (string) ($account['client_email'] ?? '');
+
+        if ($this->accessToken !== null && $this->accessEmail === $email) {
             return $this->accessToken;
         }
 
@@ -1051,14 +1055,82 @@ class PushService
         }
 
         $this->accessToken = $token;
+        $this->accessEmail = $email;
 
         return $token;
     }
 
     /**
+     * @return array{connected: bool, source: string, project: string, email: string}
+     */
+    public function firebaseStatus(int $tenantId): array
+    {
+        $stored = $this->storedAccount($tenantId);
+
+        if ($stored !== null) {
+            return [
+                'connected' => true,
+                'source'    => 'company',
+                'project'   => (string) $stored['project_id'],
+                'email'     => (string) $stored['client_email'],
+            ];
+        }
+
+        $server = $this->fileAccount();
+
+        if ($server !== null) {
+            return [
+                'connected' => true,
+                'source'    => 'server',
+                'project'   => (string) $server['project_id'],
+                'email'     => (string) $server['client_email'],
+            ];
+        }
+
+        return ['connected' => false, 'source' => 'none', 'project' => '', 'email' => ''];
+    }
+
+    public function saveFirebase(int $tenantId, string $json): void
+    {
+        $account = json_decode($json, true);
+
+        if (! $this->validAccount($account)) {
+            throw new RuntimeException('Choose the Firebase service account JSON file.');
+        }
+
+        (new EstateService($this->db))->saveSetting($tenantId, 'fcm_service_account', json_encode($account, JSON_UNESCAPED_SLASHES));
+        $this->accessToken = null;
+        $this->accessEmail = null;
+    }
+
+    /**
      * @return array<string, mixed>|null
      */
-    private function serviceAccount(): ?array
+    private function serviceAccount(int $tenantId): ?array
+    {
+        return $this->storedAccount($tenantId) ?? $this->fileAccount();
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function storedAccount(int $tenantId): ?array
+    {
+        $raw = trim((string) ((new EstateService($this->db))->setting($tenantId, 'fcm_service_account') ?? ''));
+
+        if ($raw === '') {
+            return null;
+        }
+
+        $account = json_decode($raw, true);
+
+        return $this->validAccount($account) ? $account : null;
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function fileAccount(): ?array
     {
         $path = trim((string) env('fcm.credentials'));
 
@@ -1076,11 +1148,15 @@ class PushService
 
         $json = json_decode((string) file_get_contents($path), true);
 
-        if (! is_array($json) || empty($json['client_email']) || empty($json['private_key']) || empty($json['project_id'])) {
-            return null;
-        }
+        return $this->validAccount($json) ? $json : null;
+    }
 
-        return $json;
+    private function validAccount(mixed $account): bool
+    {
+        return is_array($account)
+            && trim((string) ($account['client_email'] ?? '')) !== ''
+            && trim((string) ($account['project_id'] ?? '')) !== ''
+            && str_contains((string) ($account['private_key'] ?? ''), 'PRIVATE KEY');
     }
 
     /**
