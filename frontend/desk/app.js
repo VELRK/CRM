@@ -28,6 +28,7 @@ const screenAccess = {
     incentives: 'incentives.view',
     activity: 'team.view',
     whatsapp: 'leads.view',
+    push: 'notifications.manage',
     settings: 'workspace.settings',
     deals: 'deals.view',
     'campaign-sources': 'masters.view',
@@ -45,7 +46,7 @@ const nav = [
     ['Sites', [['Projects', 'projects']]],
     ['Sales', [['Leads', 'leads'], ['Deals', 'deals'], ['Follow-ups', 'followups'], ['Visits', 'visits'], ['Tasks', 'tasks']]],
     ['Office', [['Attendance', 'attendance'], ['Locations', 'locations'], ['Incentives', 'incentives']]],
-    ['Insight', [['Activity', 'activity'], ['Notifications', 'notifications'], ['WhatsApp', 'whatsapp'], ['API console', 'api']]],
+    ['Insight', [['Activity', 'activity'], ['Notifications', 'notifications'], ['Push alerts', 'push'], ['WhatsApp', 'whatsapp'], ['API console', 'api']]],
 ];
 const modules = nav.flatMap((group) => group[1]);
 
@@ -3379,7 +3380,7 @@ function SendWhatsApp({ lead, onDone, onClose }) {
         ${xrow('Number', html`<input class="locked" value=${lead.phone_number || lead.phone || ''} readOnly />`)}
         ${xrow('Subject', html`<select value=${templateId} onChange=${(event) => setTemplateId(event.target.value)}><option value="">Choose a template</option>${templates.map((row) => html`<option key=${row.id} value=${String(row.id)}>${row.name}</option>`)}</select>`, true)}
         ${picked ? xrow('Message', html`<textarea readOnly value=${picked.body || ''}></textarea>`, false, true) : null}
-    `, true, 'Queue');
+    `, true, 'Send');
 }
 function sendStatus(row) {
     const key = String(row.status || 'failed');
@@ -3392,6 +3393,9 @@ function WhatsAppBoard({ user }) {
     const [templates, setTemplates] = useState([]);
     const [text, setText] = useState('');
     const [status, setStatus] = useState('');
+    const [kind, setKind] = useState('');
+    const [from, setFrom] = useState('');
+    const [to, setTo] = useState('');
     const [adding, setAdding] = useState(false);
     const [error, setError] = useState('');
     function load() {
@@ -3402,9 +3406,13 @@ function WhatsAppBoard({ user }) {
     useEffect(() => { load(); }, []);
     const q = text.trim().toLowerCase();
     const rows = sent.filter((row) => {
-        if (status && String(row.status_label) !== status) return false;
+        const day = String(row.created_at || '').slice(0, 10);
+        if (status && String(row.status) !== status) return false;
+        if (kind && String(row.kind || 'lead') !== kind) return false;
+        if (from && (!day || day < from)) return false;
+        if (to && (!day || day > to)) return false;
         if (!q) return true;
-        return [row.lead_name, row.to_phone, row.subject, row.body, row.user_name].join(' ').toLowerCase().includes(q);
+        return [row.lead_name, row.to_phone, row.subject, row.body, row.user_name, row.kind_label, row.detail].join(' ').toLowerCase().includes(q);
     });
     return html`<section class="notice-page">
         <div class="site-tabs">
@@ -3413,13 +3421,17 @@ function WhatsAppBoard({ user }) {
         </div>
         ${error ? html`<p class="error">${error}</p>` : null}
         ${tab === 'sent' ? html`<section class="panel-card">
-            <div class="card-head"><div><h3>Sent report</h3><p>Lead, number, subject, and delivery status for each WhatsApp message.</p></div></div>
-            <div class="board-tools">
-                <label class="page-size">Status<select value=${status} onChange=${(event) => setStatus(event.target.value)}><option value="">All</option><option>Not delivered</option><option>Queued</option><option>Sent</option><option>Delivered</option><option>Read</option></select></label>
-                <div class="board-search"><input placeholder="Search lead, number, subject" value=${text} onInput=${(event) => setText(event.target.value)} /><span>${rows.length} messages</span></div>
+            <div class="card-head"><div><h3>Sent report</h3><p>Every AskEva send, including follow-up, visit, and task reminders.</p></div></div>
+            <div class="activity-filters">
+                <label>Search<input placeholder="Lead, number, subject" value=${text} onInput=${(event) => setText(event.target.value)} /></label>
+                <label>Status<select value=${status} onChange=${(event) => setStatus(event.target.value)}><option value="">All</option><option value="sent">Sent</option><option value="failed">Not delivered</option><option value="queued">Queued</option><option value="delivered">Delivered</option><option value="read">Read</option></select></label>
+                <label>Kind<select value=${kind} onChange=${(event) => setKind(event.target.value)}><option value="">All</option><option value="lead">Lead message</option><option value="followup.reminder">Follow-up reminder</option><option value="visit.reminder">Visit reminder</option><option value="task.reminder">Task reminder</option></select></label>
+                <label>From<input type="date" value=${from} onInput=${(event) => setFrom(event.target.value)} /></label>
+                <label>To<input type="date" value=${to} onInput=${(event) => setTo(event.target.value)} /></label>
             </div>
-            ${rows.length === 0 ? html`<p class="empty-line">No WhatsApp messages yet. Open a lead and use Send WhatsApp.</p>` : html`<div class="table-card"><table class="board-table"><thead><tr><th>When</th><th>Lead</th><th>Number</th><th>Subject</th><th>Message</th><th>Status</th><th>Sent by</th></tr></thead><tbody>
-                ${rows.map((row) => html`<tr key=${row.id}><td>${prettyWhen(row.created_at)}</td><td>${row.lead_name || '—'}</td><td>${row.to_phone || '—'}</td><td>${row.subject || '—'}</td><td>${row.body || '—'}</td><td>${sendStatus(row)}</td><td>${row.user_name || '—'}</td></tr>`)}
+            <p class="fine">${rows.length} messages</p>
+            ${rows.length === 0 ? html`<p class="empty-line">${sent.length === 0 ? 'No WhatsApp messages yet. Open a lead and use Send WhatsApp.' : 'Nothing matches this filter.'}</p>` : html`<div class="table-card"><table class="board-table"><thead><tr><th>When</th><th>Lead</th><th>Number</th><th>Kind</th><th>Subject</th><th>Message</th><th>Status</th><th>Detail</th><th>Sent by</th></tr></thead><tbody>
+                ${rows.map((row) => html`<tr key=${row.id}><td>${prettyWhen(row.created_at)}</td><td>${row.lead_name || '—'}</td><td>${row.to_phone || '—'}</td><td>${row.kind_label || 'Lead message'}</td><td>${row.subject || '—'}</td><td>${row.body || '—'}</td><td>${sendStatus(row)}</td><td>${row.detail || '—'}</td><td>${row.user_name || '—'}</td></tr>`)}
             </tbody></table></div>`}
         </section>` : html`<section class="panel-card">
             <div class="card-head"><div><h3>Templates</h3><p>Subjects you can send to a lead.</p></div>${allows(user, 'whatsapp.manage') ? html`<button class="primary" type="button" onClick=${() => setAdding(true)}>Add template</button>` : null}</div>
@@ -3491,6 +3503,9 @@ function PushGuide({ onClose }) {
         ['Site visit scheduled', 'Sends when a site visit is saved. The person this event is about is the employee on that visit.'],
         ['Task assigned', 'Sends when a task is saved. The person this event is about is the employee the task is assigned to.'],
         ['Task completed', 'Sends when a task is marked done. The person this event is about is the employee the task was assigned to. Moving the task to another time does not send it.'],
+        ['Follow-up reminder', 'Sends from the reminder job when a follow-up is due. The person this event is about is the employee the follow-up is assigned to.'],
+        ['Site visit reminder', 'Sends from the reminder job when a visit is due. The person this event is about is the employee on that visit.'],
+        ['Task reminder', 'Sends from the reminder job when a task is due. The person this event is about is the employee the task is assigned to.'],
         ['Attendance marked', 'Sends when attendance is marked or corrected. The person this event is about is the employee whose attendance was marked. {place} is the location name when one was chosen.'],
         ['Announcement', 'Sends only when you press Send on the Send tab. It is not tied to a lead, task, or visit, so there is no event person, team, or team head. Pick the people, teams, roles, or designations yourself.'],
     ];
@@ -3542,6 +3557,10 @@ function PushBoard() {
     const [options, setOptions] = useState({ events: [], staff: [], teams: [], roles: [], designations: [], projects: [], push: false });
     const [rules, setRules] = useState([]);
     const [history, setHistory] = useState([]);
+    const [historyEvent, setHistoryEvent] = useState('');
+    const [historyFrom, setHistoryFrom] = useState('');
+    const [historyTo, setHistoryTo] = useState('');
+    const [historyText, setHistoryText] = useState('');
     const [people, setPeople] = useState([]);
     const [form, setForm] = useState(blank());
     const [announce, setAnnounce] = useState({ kind: 'text', media: '', title: '', message: '', recipients: { subject: false, subject_team: false, team_head: false, all_active: false, users: [], teams: [], roles: [], designations: [] }, conditions: { active_only: true, project_id: 0, designation: '', manager_user_id: 0 } });
@@ -3641,6 +3660,15 @@ function PushBoard() {
         catch (e) { setError(e.message); }
     }
     const [pickedHistory, setPickedHistory] = useState(0);
+    const historyNeedle = historyText.trim().toLowerCase();
+    const historyRows = history.filter((row) => {
+        const day = String(row.created_at || '').slice(0, 10);
+        if (historyEvent && row.event_key !== historyEvent) return false;
+        if (historyFrom && (!day || day < historyFrom)) return false;
+        if (historyTo && (!day || day > historyTo)) return false;
+        if (!historyNeedle) return true;
+        return [row.title, row.message, row.triggered_by_name, row.event_key].join(' ').toLowerCase().includes(historyNeedle);
+    });
     return html`<section>
         ${error ? html`<p class="error">${error}</p>` : null}
         <div class="push-counts">
@@ -3682,8 +3710,15 @@ function PushBoard() {
             ${boxes(announce, setAnnounce, false)}
             <div class="form-actions"><button class="primary" type="submit">Send</button></div>
         </form>` : null}
-        ${tab === 'history' ? html`<div><div class="table-wrap"><table class="board-table"><thead><tr><th>When</th><th>Event</th><th>Type</th><th>Title</th><th>By</th><th>Sent</th><th>Failed</th></tr></thead><tbody>
-            ${history.length === 0 ? html`<tr><td colSpan="7">Nothing sent yet.</td></tr>` : history.map((row) => html`<tr key=${row.id} onClick=${() => openHistory(row)}>
+        ${tab === 'history' ? html`<div>
+            <div class="activity-filters">
+                <label>Search<input placeholder="Title or person" value=${historyText} onInput=${(event) => setHistoryText(event.target.value)} /></label>
+                <label>Event<select value=${historyEvent} onChange=${(event) => setHistoryEvent(event.target.value)}><option value="">All events</option>${(options.events || []).concat([{ key: 'manual', label: 'Announcement' }]).map((row) => html`<option key=${row.key} value=${row.key}>${row.label}</option>`)}</select></label>
+                <label>From<input type="date" value=${historyFrom} onInput=${(event) => setHistoryFrom(event.target.value)} /></label>
+                <label>To<input type="date" value=${historyTo} onInput=${(event) => setHistoryTo(event.target.value)} /></label>
+            </div>
+            <div class="table-wrap"><table class="board-table"><thead><tr><th>When</th><th>Event</th><th>Type</th><th>Title</th><th>By</th><th>Sent</th><th>Failed</th></tr></thead><tbody>
+            ${historyRows.length === 0 ? html`<tr><td colSpan="7">${history.length === 0 ? 'Nothing sent yet.' : 'Nothing matches this filter.'}</td></tr>` : historyRows.map((row) => html`<tr key=${row.id} onClick=${() => openHistory(row)}>
                 <td>${prettyWhen(row.created_at)}</td><td>${row.event_key}</td><td>${kindLabel[row.kind] || 'Text'}</td><td>${row.title}</td><td>${row.triggered_by_name || '—'}</td><td>${row.successful_count}</td><td>${row.failed_count}</td>
             </tr>`)}
         </tbody></table></div>

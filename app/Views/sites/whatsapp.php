@@ -21,6 +21,53 @@
     <button class="ghost" type="submit">Save connection</button>
 </form>
 <?php endif; ?>
+<h2>Sent report</h2>
+<form method="get" action="<?= site_url('app/whatsapp') ?>" class="panel stack">
+    <label>Status
+        <select name="status">
+            <option value="">All</option>
+            <?php foreach (['sent' => 'Sent', 'failed' => 'Not delivered', 'queued' => 'Queued', 'delivered' => 'Delivered', 'read' => 'Read'] as $value => $label) : ?>
+                <option value="<?= esc($value) ?>" <?= ($filters['status'] ?? '') === $value ? 'selected' : '' ?>><?= esc($label) ?></option>
+            <?php endforeach; ?>
+        </select>
+    </label>
+    <label>Kind
+        <select name="kind">
+            <option value="">All</option>
+            <?php foreach (['lead' => 'Lead message', 'followup.reminder' => 'Follow-up reminder', 'visit.reminder' => 'Visit reminder', 'task.reminder' => 'Task reminder'] as $value => $label) : ?>
+                <option value="<?= esc($value) ?>" <?= ($filters['kind'] ?? '') === $value ? 'selected' : '' ?>><?= esc($label) ?></option>
+            <?php endforeach; ?>
+        </select>
+    </label>
+    <label>From <input type="date" name="from" value="<?= esc($filters['from'] ?? '') ?>"></label>
+    <label>To <input type="date" name="to" value="<?= esc($filters['to'] ?? '') ?>"></label>
+    <label>Search <input name="q" value="<?= esc($filters['q'] ?? '') ?>" placeholder="Lead, number, subject"></label>
+    <button class="ghost" type="submit">Filter</button>
+</form>
+<div class="table-wrap">
+    <table class="data">
+        <thead><tr><th>When</th><th>Lead</th><th>Number</th><th>Kind</th><th>Subject</th><th>Message</th><th>Status</th><th>Detail</th><th>Sent by</th></tr></thead>
+        <tbody>
+        <?php if (($messages ?? []) === []) : ?>
+            <tr><td colspan="9">No WhatsApp messages match this filter.</td></tr>
+        <?php endif; ?>
+        <?php foreach ($messages ?? [] as $message) : ?>
+            <tr>
+                <td><?= esc($message['created_at']) ?></td>
+                <td><?= esc($message['lead_name'] ?: '—') ?></td>
+                <td><?= esc($message['to_phone'] ?: '—') ?></td>
+                <td><?= esc($message['kind_label'] ?? 'Lead message') ?></td>
+                <td><?= esc($message['subject'] ?: '—') ?></td>
+                <td><?= esc($message['body'] ?: '—') ?></td>
+                <td><?= esc($message['status_label'] ?? 'Not delivered') ?></td>
+                <td><?= esc($message['detail'] ?: '—') ?></td>
+                <td><?= esc($message['user_name'] ?: '—') ?></td>
+            </tr>
+        <?php endforeach; ?>
+        </tbody>
+    </table>
+</div>
+<h2>Templates</h2>
 <div class="table-wrap">
     <table class="data">
         <thead><tr><th>Template</th><th>Language</th><th>Message</th></tr></thead>

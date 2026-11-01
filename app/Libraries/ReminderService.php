@@ -250,23 +250,24 @@ class ReminderService
         $values = $this->askeva->values($body, $known, $fallback);
         $result = $this->askeva->sendTemplate($token, $phone, $name, $language, $values);
         $rendered = $body !== '' ? strtr($body, $this->braces($known)) : $subject;
-
-        if ($leadId < 1 || ! $this->db->tableExists('whatsapp_messages')) {
-            return;
-        }
-
-        $this->db->table('whatsapp_messages')->insert([
-            'tenant_id'   => $tenantId,
-            'lead_id'     => $leadId,
-            'user_id'     => $userId,
-            'direction'   => 'out',
-            'template_id' => $template === null ? null : (int) $template['id'],
-            'to_phone'    => $phone,
-            'subject'     => $subject,
-            'body'        => mb_substr($rendered, 0, 2000),
-            'status'      => $result['ok'] ? 'sent' : 'failed',
-            'created_at'  => date('Y-m-d H:i:s'),
-        ]);
+        $kind = match ($setting) {
+            'whatsapp_followup_reminder' => 'followup.reminder',
+            'whatsapp_visit_reminder'    => 'visit.reminder',
+            'whatsapp_task_reminder'     => 'task.reminder',
+            default                      => 'lead',
+        };
+        $estate->logWhatsapp(
+            $tenantId,
+            $leadId,
+            $userId,
+            $template === null ? 0 : (int) $template['id'],
+            $phone,
+            $subject,
+            $rendered,
+            $result['ok'] ? 'sent' : 'failed',
+            $result['ok'] ? 'Sent through AskEva.' : $result['error'],
+            $kind,
+        );
     }
 
     /**

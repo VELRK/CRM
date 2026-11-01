@@ -296,6 +296,20 @@ class EstateController extends PortalController
             'visitReminder'    => $this->estate->setting($this->tenantId, 'whatsapp_visit_reminder') ?? '',
             'taskReminder'     => $this->estate->setting($this->tenantId, 'whatsapp_task_reminder') ?? '',
             'open'      => old('form') === 'template',
+            'messages'  => $this->estate->messages($this->tenantId, [
+                'status' => (string) $this->request->getGet('status'),
+                'kind'   => (string) $this->request->getGet('kind'),
+                'from'   => (string) $this->request->getGet('from'),
+                'to'     => (string) $this->request->getGet('to'),
+                'q'      => (string) $this->request->getGet('q'),
+            ]),
+            'filters'   => [
+                'status' => (string) $this->request->getGet('status'),
+                'kind'   => (string) $this->request->getGet('kind'),
+                'from'   => (string) $this->request->getGet('from'),
+                'to'     => (string) $this->request->getGet('to'),
+                'q'      => (string) $this->request->getGet('q'),
+            ],
         ]);
     }
 
@@ -352,12 +366,14 @@ class EstateController extends PortalController
         }
 
         try {
-            $this->estate->queueMessage($this->tenantId, $this->userId, $leadId, (int) $this->request->getPost('template_id'));
+            $result = $this->estate->queueMessage($this->tenantId, $this->userId, $leadId, (int) $this->request->getPost('template_id'));
         } catch (\Throwable $e) {
             return redirect()->back()->with('error', $e->getMessage());
         }
 
-        return redirect()->to('/app/leads')->with('message', 'The message was saved on the lead. It was not delivered because WhatsApp is not connected.');
+        $sent = ($result['status'] ?? '') === 'sent';
+
+        return redirect()->to('/app/whatsapp')->with($sent ? 'message' : 'error', $sent ? 'Sent through AskEva.' : (string) $result['detail']);
     }
 
     public function exportPlots()

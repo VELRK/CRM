@@ -389,7 +389,7 @@ class PushService
     /**
      * @return list<array<string, mixed>>
      */
-    public function history(int $tenantId, int $limit = 50): array
+    public function history(int $tenantId, int $limit = 300): array
     {
         if (! $this->db->tableExists('notification_logs')) {
             return [];

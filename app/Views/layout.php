@@ -46,6 +46,7 @@
             ['reports', 'Reports', 'chart-column', 'reports.view', 'app/reports'],
             ['desk', 'React desk', 'layout-dashboard', null, 'desk/index.html'],
             ['audit', 'Activity', 'scroll-text', 'team.view', 'app/audit'],
+            ['push', 'Push alerts', 'bell', 'notifications.manage', 'desk/index.html#push'],
             ['whatsapp', 'WhatsApp', 'messages-square', 'whatsapp.manage', 'app/whatsapp'],
             ['lists', 'Lists', 'file-text', 'workspace.settings', 'app/lists'],
         ],

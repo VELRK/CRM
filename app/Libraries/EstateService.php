@@ -1176,36 +1176,51 @@ class EstateService
             '{{number}}'     => $phone,
         ]);
         $result = $askeva->sendTemplate((string) ($this->setting($tenantId, 'whatsapp_token') ?? ''), $phone, (string) $template['name'], (string) ($template['language'] ?? 'en'), $values);
-        $this->db->table('whatsapp_messages')->insert([
-            'tenant_id'   => $tenantId,
-            'lead_id'     => $leadId,
-            'user_id'     => $userId,
-            'direction'   => 'out',
-            'template_id' => $templateId,
-            'to_phone'    => $phone,
-            'subject'     => (string) $template['name'],
-            'body'        => $body,
-            'status'      => $result['ok'] ? 'sent' : 'failed',
-            'created_at'  => date('Y-m-d H:i:s'),
-        ]);
+        $detail = $result['ok'] ? 'Sent through AskEva.' : $result['error'];
+        $this->logWhatsapp($tenantId, $leadId, $userId, $templateId, $phone, (string) $template['name'], $body, $result['ok'] ? 'sent' : 'failed', $detail, 'lead');
 
         return [
             'status' => $result['ok'] ? 'sent' : 'failed',
-            'detail' => $result['ok'] ? 'Sent through AskEva.' : $result['error'],
+            'detail' => $detail,
         ];
     }
 
+    public function logWhatsapp(int $tenantId, int $leadId, int $userId, int $templateId, string $phone, string $subject, string $body, string $status, string $detail, string $kind): void
+    {
+        if (! $this->db->tableExists('whatsapp_messages')) {
+            return;
+        }
+
+        $this->ensureMessageColumns();
+        $this->db->table('whatsapp_messages')->insert([
+            'tenant_id'   => $tenantId,
+            'lead_id'     => $leadId > 0 ? $leadId : null,
+            'user_id'     => $userId > 0 ? $userId : null,
+            'direction'   => 'out',
+            'template_id' => $templateId > 0 ? $templateId : null,
+            'to_phone'    => $phone,
+            'subject'     => mb_substr($subject, 0, 120),
+            'body'        => mb_substr($body, 0, 4000),
+            'status'      => $status,
+            'kind'        => $kind !== '' ? $kind : 'lead',
+            'detail'      => mb_substr($detail, 0, 180),
+            'created_at'  => date('Y-m-d H:i:s'),
+        ]);
+    }
+
     /**
+     * @param array<string, string> $filters
      * @return list<array<string, mixed>>
      */
-    public function messages(int $tenantId): array
+    public function messages(int $tenantId, array $filters = []): array
     {
         if (! $this->db->tableExists('whatsapp_messages')) {
             return [];
         }
 
+        $this->ensureMessageColumns();
         $rows = $this->db->table('whatsapp_messages m')
-            ->select('m.id, m.lead_id, m.to_phone, m.subject, m.body, m.status, m.created_at, l.name AS lead_name, IFNULL(l.phone_number, l.phone) AS lead_phone, t.name AS template_name, u.name AS user_name', false)
+            ->select('m.id, m.lead_id, m.to_phone, m.subject, m.body, m.status, m.kind, m.detail, m.created_at, l.name AS lead_name, IFNULL(l.phone_number, l.phone) AS lead_phone, t.name AS template_name, u.name AS user_name', false)
             ->join('leads l', 'l.id = m.lead_id', 'left')
             ->join('whatsapp_templates t', 't.id = m.template_id', 'left')
             ->join('users u', 'u.id = m.user_id', 'left')
@@ -1223,6 +1238,14 @@ class EstateService
                 $row['subject'] = (string) ($row['template_name'] ?? 'Message');
             }
 
+            $row['kind'] = (string) ($row['kind'] ?: 'lead');
+            $row['kind_label'] = match ($row['kind']) {
+                'followup.reminder' => 'Follow-up reminder',
+                'visit.reminder'    => 'Visit reminder',
+                'task.reminder'     => 'Task reminder',
+                default             => 'Lead message',
+            };
+            $row['detail'] = (string) ($row['detail'] ?? '');
             $row['status_label'] = match ((string) $row['status']) {
                 'delivered' => 'Delivered',
                 'read'      => 'Read',
@@ -1233,7 +1256,73 @@ class EstateService
         }
         unset($row);
 
-        return $rows;
+        $status = (string) ($filters['status'] ?? '');
+        $kind = (string) ($filters['kind'] ?? '');
+        $from = (string) ($filters['from'] ?? '');
+        $to = (string) ($filters['to'] ?? '');
+        $needle = mb_strtolower(trim((string) ($filters['q'] ?? '')));
+
+        return array_values(array_filter($rows, static function (array $row) use ($status, $kind, $from, $to, $needle): bool {
+            $day = substr((string) ($row['created_at'] ?? ''), 0, 10);
+
+            if ($status !== '' && (string) $row['status'] !== $status) {
+                return false;
+            }
+
+            if ($kind !== '' && (string) $row['kind'] !== $kind) {
+                return false;
+            }
+
+            if ($from !== '' && ($day === '' || $day < $from)) {
+                return false;
+            }
+
+            if ($to !== '' && ($day === '' || $day > $to)) {
+                return false;
+            }
+
+            if ($needle === '') {
+                return true;
+            }
+
+            $haystack = mb_strtolower(implode(' ', [
+                (string) ($row['lead_name'] ?? ''),
+                (string) ($row['to_phone'] ?? ''),
+                (string) ($row['subject'] ?? ''),
+                (string) ($row['body'] ?? ''),
+                (string) ($row['user_name'] ?? ''),
+                (string) ($row['kind_label'] ?? ''),
+                (string) ($row['detail'] ?? ''),
+            ]));
+
+            return str_contains($haystack, $needle);
+        }));
+    }
+
+    private function ensureMessageColumns(): void
+    {
+        if (! $this->db->tableExists('whatsapp_messages')) {
+            return;
+        }
+
+        $table = str_replace('`', '', $this->db->prefixTable('whatsapp_messages'));
+
+        if (! $this->db->fieldExists('detail', 'whatsapp_messages')) {
+            $this->db->query('ALTER TABLE `' . $table . '` ADD `detail` VARCHAR(180) NULL');
+            $this->db->resetDataCache();
+        }
+
+        if (! $this->db->fieldExists('kind', 'whatsapp_messages')) {
+            $this->db->query("ALTER TABLE `" . $table . "` ADD `kind` VARCHAR(32) NOT NULL DEFAULT 'lead'");
+            $this->db->resetDataCache();
+        }
+
+        $column = $this->db->query('SHOW COLUMNS FROM `' . $table . "` LIKE 'lead_id'")->getRowArray();
+
+        if ($column !== null && strtoupper((string) ($column['Null'] ?? '')) === 'NO') {
+            $this->db->query('ALTER TABLE `' . $table . '` MODIFY `lead_id` INT UNSIGNED NULL');
+            $this->db->resetDataCache();
+        }
     }
 
     /**

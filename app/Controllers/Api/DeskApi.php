@@ -363,7 +363,7 @@ class DeskApi extends BaseController
     {
         return $this->ok([
             'base'    => rtrim(base_url(), '/'),
-            'note'    => 'Sign in with POST /api/v1/auth/login, then send Authorization: Bearer and that token on every other call, including GET. The workspace comes from the token. Do not send companyId. Automatic lead assignment is not in this API. WhatsApp messages are stored and are not delivered until a provider is connected.',
+            'note'    => 'Sign in with POST /api/v1/auth/login, then send Authorization: Bearer and that token on every other call, including GET. The workspace comes from the token. Do not send companyId. Automatic lead assignment is not in this API. WhatsApp messages go out through AskEva and stay in the sent report.',
             'entries' => ApiCatalog::entries(),
         ]);
     }
