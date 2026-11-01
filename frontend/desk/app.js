@@ -1385,6 +1385,7 @@ function SitesBoard({ start, user }) {
     const [error, setError] = useState('');
     const [edit, setEdit] = useState(null);
     const [adding, setAdding] = useState(false);
+    const [photos, setPhotos] = useState(null);
     const [projectForm, setProjectForm] = useState(null);
     const [confirm, setConfirm] = useState(null);
     const [listOpen, setListOpen] = useState(false);
@@ -1530,10 +1531,11 @@ function SitesBoard({ start, user }) {
         ${tab === 'teams' ? html`<section class="panel-card"><h3>Team-wise and associate performance</h3><p>This table is counted from bookings. The associate chosen on the booking supplies the team head. There is no separate form.</p><div class="table-card"><table class="board-table"><thead><tr><th>Team head</th><th>Associate</th><th>Total plots</th><th>Booking cases</th><th>Advance</th><th>Booking amount</th><th>Follow-up</th><th>Advance overdue</th><th>Registration overdue</th><th>Completed</th></tr></thead><tbody>
             ${Object.values(teams).map((item) => html`<tr key=${item.head + item.associate}><td>${item.head}</td><td>${item.associate}</td><td>${item.plots}</td><td>${item.bookings}</td><td>${money(item.advance)}</td><td>${money(item.amount)}</td><td>${item.follow}</td><td>${item.advOver}</td><td>${item.regOver}</td><td>${item.done}</td></tr>`)}
         </tbody></table></div></section>` : null}
-        ${tab === 'inventory' ? html`<section class="panel-card"><div class="card-head"><h3>Plot inventory</h3>${canAddPlot ? html`<button class="primary" type="button" onClick=${() => setAdding(true)}>Add plot</button>` : null}</div><${PlotTable} rows=${searched} mode="inventory" onEdit=${canEditPlot ? setEdit : null} onDelete=${canDeletePlot ? (row) => setConfirm({ kind: 'plot', row }) : null} /></section>` : null}
+        ${tab === 'inventory' ? html`<section class="panel-card"><div class="card-head"><h3>Plot inventory</h3>${canAddPlot ? html`<button class="primary" type="button" onClick=${() => setAdding(true)}>Add plot</button>` : null}</div><${PlotTable} rows=${searched} mode="inventory" onEdit=${canEditPlot ? setEdit : null} onDelete=${canDeletePlot ? (row) => setConfirm({ kind: 'plot', row }) : null} onImages=${setPhotos} /></section>` : null}
         ${listOpen ? html`<div class="modal-back" onClick=${() => setListOpen(false)}><div class="filter-box wide" onClick=${(event) => event.stopPropagation()}><header><h2>Available plots</h2><button class="filter-x" type="button" onClick=${() => setListOpen(false)}>×</button></header><div class="filter-body"><${PlotTable} rows=${available} mode="available" /></div></div></div>` : null}
         ${edit ? html`<${BookingForm} plot=${edit} people=${people} onDone=${() => { setEdit(null); load(); }} onClose=${() => setEdit(null)} />` : null}
         ${adding ? html`<${PlotForm} projects=${projects} onDone=${() => { setAdding(false); load(); }} onClose=${() => setAdding(false)} />` : null}
+        ${photos ? html`<${PlotImages} plot=${photos} canEdit=${canEditPlot} onDone=${load} onClose=${() => setPhotos(null)} />` : null}
         ${projectForm ? html`<${ProjectForm} project=${projectForm.id ? projectForm : null} onDone=${() => { setProjectForm(null); load(); }} onClose=${() => setProjectForm(null)} />` : null}
         ${confirm ? confirmDelete(confirm.kind === 'project' ? confirm.row.name : 'plot ' + (confirm.row.plot_no || ''), error, async (event) => {
             event.preventDefault();
@@ -1548,7 +1550,7 @@ function SitesBoard({ start, user }) {
         }, () => { setConfirm(null); setError(''); }) : null}
     </div>`;
 }
-function PlotTable({ rows, mode, onEdit, onDelete }) {
+function PlotTable({ rows, mode, onEdit, onDelete, onImages }) {
     if (!rows.length) return html`<p class="empty-line">Nothing in this view.</p>`;
     return html`<div class="table-card"><table class="board-table"><thead><tr>
         <th>Project</th><th>Phase</th><th>Plot no</th><th>Commission</th>
@@ -1567,7 +1569,7 @@ function PlotTable({ rows, mode, onEdit, onDelete }) {
             ${mode === 'booking' ? html`<td>${row.customer_name || '—'}</td><td>${row.customer_phone || '—'}</td><td>${row.associate_name || '—'}</td><td>${row.head_name || '—'}</td><td>${plotTag(row.status)}</td><td>${prettyDate(row.booking_on)}</td><td>${money(row.advance_minor)}</td><td>${prettyDate(row.advance_deadline)}</td><td>${deadlineCell(row)}</td><td>${money(row.booking_amount_minor)}</td><td>${money(row.balance_minor)}</td>${onEdit ? html`<td class="row-actions">${actIcon('edit', 'Edit', () => onEdit(row))}</td>` : null}` : null}
             ${mode === 'follow' ? html`<td>${row.customer_name || '—'}</td><td>${row.customer_phone || '—'}</td><td>${row.associate_name || '—'}</td><td>${row.head_name || '—'}</td><td>${money(row.advance_minor)}</td><td>${prettyDate(row.advance_received_on)}</td><td>${prettyDate(row.registration_deadline)}</td><td>${leftCell(row)}</td><td>${plotTag(row.status)}</td><td>${regCell(row)}</td><td>${prettyDate(row.expected_registration_on)}</td><td>${row.remarks || '—'}</td>${onEdit ? html`<td class="row-actions">${actIcon('update', 'Update', () => onEdit(row))}</td>` : null}` : null}
             ${mode === 'done' ? html`<td>${row.customer_name || '—'}</td><td>${row.customer_phone || '—'}</td><td>${row.associate_name || '—'}</td><td>${row.head_name || '—'}</td><td>${plotTag(row.status)}</td><td>${regCell(row)}</td><td>${prettyDate(row.expected_registration_on)}</td><td>${prettyDate(row.registered_on)}</td><td>${row.remarks || '—'}</td>${onEdit ? html`<td class="row-actions">${actIcon('update', 'Update', () => onEdit(row))}</td>` : null}` : null}
-            ${mode === 'inventory' ? html`<td>${row.facing || '—'}</td><td>${row.area_sqft || '—'}</td><td>${plotTag(row.status)}</td><td>${row.customer_name || '—'}</td><td>${row.associate_name || '—'}</td><td>${row.head_name || '—'}</td><td>${regCell(row)}</td><td>${prettyDate(row.expected_registration_on)}</td>${onEdit || onDelete ? html`<td class="row-actions">${onEdit ? actIcon('edit', 'Edit', () => onEdit(row)) : null}${onDelete ? actIcon('delete', 'Delete', () => onDelete(row)) : null}</td>` : null}` : null}
+            ${mode === 'inventory' ? html`<td>${row.facing || '—'}</td><td>${row.area_sqft || '—'}</td><td>${plotTag(row.status)}</td><td>${row.customer_name || '—'}</td><td>${row.associate_name || '—'}</td><td>${row.head_name || '—'}</td><td>${regCell(row)}</td><td>${prettyDate(row.expected_registration_on)}</td>${onEdit || onDelete || onImages ? html`<td class="row-actions">${onImages ? html`<button class="ghost" type="button" onClick=${() => onImages(row)}>Images${row.images && row.images.length ? ' (' + row.images.length + ')' : ''}</button>` : null}${onEdit ? actIcon('edit', 'Edit', () => onEdit(row)) : null}${onDelete ? actIcon('delete', 'Delete', () => onDelete(row)) : null}</td>` : null}` : null}
         </tr>`)}
     </tbody></table></div>`;
 }
@@ -1592,16 +1594,21 @@ function LeadStory({ rows }) {
     const list = Array.isArray(rows) ? rows : [];
     const [query, setQuery] = useState('');
     const [action, setAction] = useState('');
+    const [from, setFrom] = useState('');
+    const [to, setTo] = useState('');
     const [page, setPage] = useState(0);
     const [pageSize, setPageSize] = useState(10);
     const actions = [...new Set(list.map((row) => row.action).filter(Boolean))];
     const needle = query.trim().toLowerCase();
     const shown = list.filter((row) => {
+        const day = String(row.at || '').slice(0, 10);
+        if (from && (!day || day < from)) return false;
+        if (to && (!day || day > to)) return false;
         if (action && row.action !== action) return false;
         if (!needle) return true;
         return [row.title, row.who, row.body, row.meta, ACTIVITY_LABEL[row.action] || row.action].join(' ').toLowerCase().includes(needle);
     });
-    useEffect(() => { setPage(0); }, [query, action, pageSize, list.length]);
+    useEffect(() => { setPage(0); }, [query, action, from, to, pageSize, list.length]);
     const pages = Math.max(1, Math.ceil(shown.length / pageSize));
     const safePage = Math.min(page, pages - 1);
     const visible = shown.slice(safePage * pageSize, safePage * pageSize + pageSize);
@@ -1612,6 +1619,8 @@ function LeadStory({ rows }) {
         <div class="activity-filters">
             <label>Search<input placeholder="Search activity" value=${query} onInput=${(event) => setQuery(event.target.value)} /></label>
             <label>Action<select value=${action} onChange=${(event) => setAction(event.target.value)}><option value="">All actions</option>${actions.map((key) => html`<option key=${key} value=${key}>${ACTIVITY_LABEL[key] || key}</option>`)}</select></label>
+            <label>From<input type="date" value=${from} onInput=${(event) => setFrom(event.target.value)} /></label>
+            <label>To<input type="date" value=${to} onInput=${(event) => setTo(event.target.value)} /></label>
         </div>
         <div class="table-wrap"><table class="board-table"><thead><tr><th>When</th><th>Action</th><th>Who</th><th>Detail</th></tr></thead><tbody>
             ${visible.length === 0 ? html`<tr><td colSpan="4">${list.length === 0 ? 'No activity yet' : 'Nothing matches this filter.'}</td></tr>` : visible.map((row, index) => html`<tr key=${String(safePage) + '-' + index + (row.at || '')}>
@@ -1692,8 +1701,21 @@ function BookingForm({ plot, people, onDone, onClose }) {
         ${xrow('Remarks', html`<textarea value=${form.remarks} onInput=${set('remarks')}></textarea>`, false, true)}
     `, true, 'Save');
 }
+async function uploadPlotImage(plotId, file) {
+    const headers = { Accept: 'application/json' };
+    const token = localStorage.getItem(tokenKey);
+    if (token) headers.Authorization = 'Bearer ' + token;
+    const body = new FormData();
+    body.append('image', file);
+    const response = await fetch(apiPath('/api/v1/plots/' + plotId + '/images'), { method: 'POST', headers, body });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || payload.ok === false) throw new Error(payload.error || 'The image was not saved.');
+    return payload.data;
+}
 function PlotForm({ projects, onDone, onClose }) {
     const [form, setForm] = useState({ project_id: projects[0] ? String(projects[0].id) : '', phase: '', plot_no: '', facing: '', area_sqft: '', commission: '', status: 'available' });
+    const [files, setFiles] = useState([]);
+    const [savedId, setSavedId] = useState(0);
     const [error, setError] = useState('');
     const set = (key) => (event) => setForm({ ...form, [key]: event.target.value });
     async function submit(event) {
@@ -1701,7 +1723,13 @@ function PlotForm({ projects, onDone, onClose }) {
         setError('');
         if (!String(form.commission).trim() || Number(form.commission) <= 0) { setError('Enter the commission for this plot.'); return; }
         try {
-            await call('/api/v1/plots', { method: 'POST', body: { ...form, project_id: Number(form.project_id) } });
+            let id = savedId;
+            if (!id) {
+                const saved = await call('/api/v1/plots', { method: 'POST', body: { ...form, project_id: Number(form.project_id) } });
+                id = saved.id;
+                setSavedId(id);
+            }
+            for (const file of files) await uploadPlotImage(id, file);
             onDone();
         } catch (e) { setError(e.message); }
     }
@@ -1713,7 +1741,59 @@ function PlotForm({ projects, onDone, onClose }) {
         ${xrow('Area', html`<input value=${form.area_sqft} onInput=${set('area_sqft')} />`)}
         ${xrow('Commission', html`<input type="number" min="1" value=${form.commission} onInput=${set('commission')} />`, true)}
         ${xrow('Status', html`<select value=${form.status} onChange=${set('status')}>${['available', 'hold', 'owner_use', 'future', 'blocked'].map((value) => html`<option key=${value} value=${value}>${PLOT_LABEL[value]}</option>`)}</select>`, true)}
+        ${xrow('Images', html`<input type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple onChange=${(event) => setFiles([...(event.target.files || [])])} />`, false)}
     `, true, 'Add');
+}
+function AuthImage({ src }) {
+    const [url, setUrl] = useState('');
+    useEffect(() => {
+        let objectUrl = '';
+        let gone = false;
+        const token = localStorage.getItem(tokenKey);
+        fetch(apiPath(src), { headers: token ? { Authorization: 'Bearer ' + token } : {} })
+            .then((response) => (response.ok ? response.blob() : null))
+            .then((blob) => {
+                if (gone || !blob) return;
+                objectUrl = URL.createObjectURL(blob);
+                setUrl(objectUrl);
+            })
+            .catch(() => {});
+        return () => { gone = true; if (objectUrl) URL.revokeObjectURL(objectUrl); };
+    }, [src]);
+    return url ? html`<img src=${url} alt="" />` : html`<span class="muted">…</span>`;
+}
+function PlotImages({ plot, canEdit, onDone, onClose }) {
+    const [images, setImages] = useState(plot.images || []);
+    const [error, setError] = useState('');
+    async function add(event) {
+        const chosen = [...(event.target.files || [])];
+        event.target.value = '';
+        if (!chosen.length) return;
+        setError('');
+        try {
+            const saved = [];
+            for (const file of chosen) saved.push(await uploadPlotImage(plot.id, file));
+            setImages([...images, ...saved]);
+            if (onDone) onDone();
+        } catch (e) { setError(e.message); }
+    }
+    async function remove(image) {
+        setError('');
+        try {
+            await call('/api/v1/plots/' + plot.id + '/images/' + image.id + '/delete', { method: 'POST', body: {} });
+            setImages(images.filter((item) => item.id !== image.id));
+            if (onDone) onDone();
+        } catch (e) { setError(e.message); }
+    }
+    return html`<div class="modal-back" onClick=${onClose}><div class="filter-box" onClick=${(event) => event.stopPropagation()}>
+        <header><h2>Images · ${plot.plot_no || 'Plot'}</h2><button class="filter-x" type="button" onClick=${onClose}>×</button></header>
+        <div class="filter-body stack">
+            ${error ? html`<p class="error">${error}</p>` : null}
+            <div class="plot-photos">${images.length === 0 ? html`<p class="empty-line">No images yet.</p>` : images.map((image) => html`<figure key=${image.id}><${AuthImage} src=${image.url} />${canEdit ? html`<button type="button" onClick=${() => remove(image)}>Remove</button>` : null}</figure>`)}</div>
+            ${canEdit ? html`<label class="field">Add images<input type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple onChange=${add} /></label>` : null}
+            <p class="muted">PNG, JPG, WebP, or GIF, up to 8 MB. A plot keeps 12 images.</p>
+        </div>
+    </div></div>`;
 }
 function StaffForm({ person, onDone, onClose }) {
     const [form, setForm] = useState({ phone: person.phone_number || person.phone || '', status: person.status || 'active', team_id: person.team_id ? String(person.team_id) : '' });
@@ -1784,6 +1864,9 @@ function Resource({ title, lede, spec, user }) {
     const [rows, setRows] = useState([]);
     const [error, setError] = useState('');
     const [picked, setPicked] = useState(null);
+    const [fromDay, setFromDay] = useState('');
+    const [toDay, setToDay] = useState('');
+    const dated = spec.path === '/api/v1/activity';
     const [extra, setExtra] = useState('');
     const [composer, setComposer] = useState('');
     const [editing, setEditing] = useState(null);
@@ -1809,9 +1892,10 @@ function Resource({ title, lede, spec, user }) {
     };
     const showBar = permit.lead || permit.followup || permit.visit || permit.task || permit.assign || permit.user || permit.role || permit.team || permit.template;
     function load() {
-        call(spec.path).then((data) => setRows(Array.isArray(data) ? data : [])).catch((e) => setError(e.message));
+        const query = dated ? '?from=' + encodeURIComponent(fromDay) + '&to=' + encodeURIComponent(toDay) : '';
+        call(spec.path + query).then((data) => setRows(Array.isArray(data) ? data : [])).catch((e) => setError(e.message));
     }
-    useEffect(() => { setDetail(null); load(); }, [spec.path]);
+    useEffect(() => { setDetail(null); load(); }, [spec.path, fromDay, toDay]);
     async function more(kind) {
         if (!picked) return;
         setError('');
@@ -1859,6 +1943,10 @@ function Resource({ title, lede, spec, user }) {
             ${permit.template ? html`<button class="primary" onClick=${() => open('template')}>Add template</button>` : null}
         </div>` : null}
         ${error ? html`<p class="error">${error}</p>` : null}
+        ${dated ? html`<div class="activity-filters">
+            <label>From<input type="date" value=${fromDay} onInput=${(event) => setFromDay(event.target.value)} /></label>
+            <label>To<input type="date" value=${toDay} onInput=${(event) => setToDay(event.target.value)} /></label>
+        </div>` : null}
         ${composer === 'lead' ? html`<${LeadForm} lead=${editing} onDone=${saved} onClose=${() => setComposer('')} />` : null}
         ${composer === 'followup' ? html`<${FollowForm} leadId=${spec.path.includes('/leads') ? picked?.id : ''} onDone=${saved} onClose=${() => setComposer('')} />` : null}
         ${composer === 'visit' ? html`<${VisitForm} leadId=${spec.path.includes('/leads') ? picked?.id : ''} onDone=${saved} onClose=${() => setComposer('')} />` : null}
@@ -2844,31 +2932,20 @@ function CompanyBoard({ onSaved, user }) {
     </form>`;
 }
 const CHECK_WORD = { open: 'Checked in', done: 'Checked out', none: 'Not checked in' };
-function loadLeaflet() {
-    if (window.L) return Promise.resolve(window.L);
-    if (!window.__leaflet) {
-        window.__leaflet = new Promise((resolve, reject) => {
-            const css = document.createElement('link');
-            css.rel = 'stylesheet';
-            css.href = 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css';
-            document.head.appendChild(css);
+const mapsKey = 'AIzaSyBW15IHr4bvDFHHUhgqVS9TyUIsUc95UEg';
+function loadGoogleMaps() {
+    if (window.google && window.google.maps) return Promise.resolve(window.google.maps);
+    if (!window.__gmaps) {
+        window.__gmaps = new Promise((resolve, reject) => {
             const script = document.createElement('script');
-            script.src = 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js';
-            script.onload = () => {
-                const L = window.L;
-                delete L.Icon.Default.prototype._getIconUrl;
-                L.Icon.Default.mergeOptions({
-                    iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon-2x.png',
-                    iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon.png',
-                    shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png',
-                });
-                resolve(L);
-            };
+            script.src = 'https://maps.googleapis.com/maps/api/js?key=' + mapsKey + '&v=weekly';
+            script.async = true;
+            script.onload = () => resolve(window.google.maps);
             script.onerror = () => reject(new Error('The map could not be loaded. Enter the latitude and longitude, or use current location.'));
             document.head.appendChild(script);
         });
     }
-    return window.__leaflet;
+    return window.__gmaps;
 }
 function MapPick({ lat, lng, onPick }) {
     const box = useRef(null);
@@ -2877,31 +2954,36 @@ function MapPick({ lat, lng, onPick }) {
     const [mapError, setMapError] = useState('');
     useEffect(() => {
         let cancelled = false;
-        loadLeaflet().then((L) => {
+        loadGoogleMaps().then((maps) => {
             if (cancelled || !box.current || mapRef.current) return;
             const has = lat !== '' && lng !== '' && !Number.isNaN(Number(lat)) && !Number.isNaN(Number(lng));
-            const map = L.map(box.current).setView(has ? [Number(lat), Number(lng)] : [20, 0], has ? 16 : 2);
-            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap' }).addTo(map);
-            map.on('click', (event) => onPick(event.latlng.lat.toFixed(7), event.latlng.lng.toFixed(7)));
+            const map = new maps.Map(box.current, {
+                center: has ? { lat: Number(lat), lng: Number(lng) } : { lat: 20, lng: 78 },
+                zoom: has ? 16 : 5,
+                mapTypeControl: false,
+                streetViewControl: false,
+                fullscreenControl: false,
+            });
+            map.addListener('click', (event) => {
+                if (!event.latLng) return;
+                onPick(event.latLng.lat().toFixed(7), event.latLng.lng().toFixed(7));
+            });
             mapRef.current = map;
-            if (has) markerRef.current = L.marker([Number(lat), Number(lng)]).addTo(map);
-            setTimeout(() => map.invalidateSize(), 200);
+            if (has) markerRef.current = new maps.Marker({ position: { lat: Number(lat), lng: Number(lng) }, map });
         }).catch((e) => { if (!cancelled) setMapError(e.message); });
-        return () => {
-            cancelled = true;
-            if (mapRef.current) { mapRef.current.remove(); mapRef.current = null; markerRef.current = null; }
-        };
+        return () => { cancelled = true; mapRef.current = null; markerRef.current = null; };
     }, []);
     useEffect(() => {
-        const L = window.L;
+        const maps = window.google && window.google.maps;
         const map = mapRef.current;
-        if (!L || !map) return;
+        if (!maps || !map) return;
         const has = lat !== '' && lng !== '' && !Number.isNaN(Number(lat)) && !Number.isNaN(Number(lng));
         if (!has) return;
-        const point = [Number(lat), Number(lng)];
-        if (markerRef.current) markerRef.current.setLatLng(point);
-        else markerRef.current = L.marker(point).addTo(map);
-        map.setView(point, Math.max(map.getZoom(), 16));
+        const point = { lat: Number(lat), lng: Number(lng) };
+        if (markerRef.current) markerRef.current.setPosition(point);
+        else markerRef.current = new maps.Marker({ position: point, map });
+        map.panTo(point);
+        if (map.getZoom() < 16) map.setZoom(16);
     }, [lat, lng]);
     return html`<div class="span-2"><div class="map-pick" ref=${box}></div>${mapError ? html`<p class="muted">${mapError}</p>` : html`<p class="muted">Click the map to set the point, or use current location.</p>`}</div>`;
 }

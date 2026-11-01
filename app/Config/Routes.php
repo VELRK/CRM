@@ -47,6 +47,9 @@ $routes->group('api/v1', ['filter' => 'apiauth'], static function ($routes) {
     $routes->get('plots', 'Api\DeskApi::plots');
     $routes->post('plots', 'Api\DeskApi::savePlot');
     $routes->post('plots/(:num)/booking', 'Api\DeskApi::plotBooking/$1');
+    $routes->post('plots/(:num)/images/(:num)/delete', 'Api\DeskApi::deletePlotImage/$1/$2');
+    $routes->get('plots/(:num)/images/(:segment)', 'Api\DeskApi::plotImage/$1/$2');
+    $routes->post('plots/(:num)/images', 'Api\DeskApi::savePlotImage/$1');
     $routes->get('plots/(:num)/history', 'Api\DeskApi::plotHistory/$1');
     $routes->post('plots/(:num)/delete', 'Api\DeskApi::deletePlot/$1');
     $routes->post('plots/(:num)', 'Api\DeskApi::savePlot/$1');

@@ -237,7 +237,7 @@ class SiteService
 
         $rows = $builder->orderBy('pr.name', 'ASC')->orderBy('p.plot_no', 'ASC')->get()->getResultArray();
 
-        return array_map(fn (array $row): array => $this->decoratePlot($row), $rows);
+        return $this->attachPlotImages($tenantId, array_map(fn (array $row): array => $this->decoratePlot($row), $rows));
     }
 
     /**
@@ -349,6 +349,175 @@ class SiteService
         }
 
         $this->db->table('plots')->where('id', $id)->update(['deleted_at' => date('Y-m-d H:i:s')]);
+        $this->ensurePlotImages();
+        $this->db->table('plot_images')->where('tenant_id', $tenantId)->where('plot_id', $id)->where('deleted_at', null)->update(['deleted_at' => date('Y-m-d H:i:s')]);
+    }
+
+    /**
+     * @param list<array<string, mixed>> $rows
+     * @return list<array<string, mixed>>
+     */
+    private function attachPlotImages(int $tenantId, array $rows): array
+    {
+        $this->ensurePlotImages();
+
+        if ($rows === []) {
+            return $rows;
+        }
+
+        $ids = array_map(static fn (array $row): int => (int) $row['id'], $rows);
+        $images = $this->db->table('plot_images')
+            ->where('tenant_id', $tenantId)
+            ->where('deleted_at', null)
+            ->whereIn('plot_id', $ids)
+            ->orderBy('id', 'ASC')
+            ->get()
+            ->getResultArray();
+        $byPlot = [];
+
+        foreach ($images as $image) {
+            $plotId = (int) $image['plot_id'];
+            $byPlot[$plotId][] = [
+                'id'  => (int) $image['id'],
+                'url' => '/api/v1/plots/' . $plotId . '/images/' . $image['stored'],
+            ];
+        }
+
+        foreach ($rows as &$row) {
+            $row['images'] = $byPlot[(int) $row['id']] ?? [];
+        }
+        unset($row);
+
+        return $rows;
+    }
+
+    /**
+     * @return array{id: int, url: string}
+     */
+    public function savePlotImage(int $tenantId, int $plotId, string $tempPath): array
+    {
+        $this->ensurePlotImages();
+
+        if ($this->plot($tenantId, $plotId) === null) {
+            throw new RuntimeException('That plot is not in this workspace.');
+        }
+
+        $count = $this->db->table('plot_images')->where('tenant_id', $tenantId)->where('plot_id', $plotId)->where('deleted_at', null)->countAllResults();
+
+        if ($count >= 12) {
+            throw new RuntimeException('A plot can have up to 12 images.');
+        }
+
+        $head = (string) file_get_contents($tempPath, false, null, 0, 16);
+        $ext = match (true) {
+            str_starts_with($head, "\x89PNG") => 'png',
+            str_starts_with($head, "\xFF\xD8\xFF") => 'jpg',
+            str_starts_with($head, 'GIF8') => 'gif',
+            str_starts_with($head, 'RIFF') && substr($head, 8, 4) === 'WEBP' => 'webp',
+            default => '',
+        };
+
+        if ($ext === '') {
+            throw new RuntimeException('Use a PNG, JPG, WebP, or GIF image.');
+        }
+
+        $size = filesize($tempPath);
+
+        if ($size === false || $size < 1 || $size > 8 * 1024 * 1024) {
+            throw new RuntimeException('Use an image up to 8 MB.');
+        }
+
+        $stored = bin2hex(random_bytes(16)) . '.' . $ext;
+        $dir = WRITEPATH . 'uploads' . DIRECTORY_SEPARATOR . $tenantId . DIRECTORY_SEPARATOR . 'plots';
+
+        if (! is_dir($dir) && ! mkdir($dir, 0755, true) && ! is_dir($dir)) {
+            throw new RuntimeException('The file store is not available.');
+        }
+
+        if (! copy($tempPath, $dir . DIRECTORY_SEPARATOR . $stored)) {
+            throw new RuntimeException('The image was not saved.');
+        }
+
+        $this->db->table('plot_images')->insert([
+            'tenant_id'  => $tenantId,
+            'plot_id'    => $plotId,
+            'stored'     => $stored,
+            'created_at' => date('Y-m-d H:i:s'),
+        ]);
+
+        return [
+            'id'  => (int) $this->db->insertID(),
+            'url' => '/api/v1/plots/' . $plotId . '/images/' . $stored,
+        ];
+    }
+
+    public function deletePlotImage(int $tenantId, int $plotId, int $imageId): void
+    {
+        $this->ensurePlotImages();
+        $row = $this->db->table('plot_images')
+            ->where('tenant_id', $tenantId)
+            ->where('plot_id', $plotId)
+            ->where('id', $imageId)
+            ->where('deleted_at', null)
+            ->get()
+            ->getRowArray();
+
+        if ($row === null) {
+            throw new RuntimeException('That image is not on this plot.');
+        }
+
+        $path = WRITEPATH . 'uploads' . DIRECTORY_SEPARATOR . $tenantId . DIRECTORY_SEPARATOR . 'plots' . DIRECTORY_SEPARATOR . $row['stored'];
+
+        if (is_file($path)) {
+            unlink($path);
+        }
+
+        $this->db->table('plot_images')->where('id', $imageId)->update(['deleted_at' => date('Y-m-d H:i:s')]);
+    }
+
+    public function plotImagePath(int $tenantId, int $plotId, string $stored): ?string
+    {
+        $this->ensurePlotImages();
+
+        if (preg_match('/^[a-f0-9]{32}\.(png|jpg|webp|gif)$/', $stored) !== 1) {
+            return null;
+        }
+
+        $row = $this->db->table('plot_images')
+            ->where('tenant_id', $tenantId)
+            ->where('plot_id', $plotId)
+            ->where('stored', $stored)
+            ->where('deleted_at', null)
+            ->get()
+            ->getRowArray();
+
+        if ($row === null) {
+            return null;
+        }
+
+        $path = WRITEPATH . 'uploads' . DIRECTORY_SEPARATOR . $tenantId . DIRECTORY_SEPARATOR . 'plots' . DIRECTORY_SEPARATOR . $stored;
+
+        return is_file($path) ? $path : null;
+    }
+
+    private function ensurePlotImages(): void
+    {
+        if ($this->db->tableExists('plot_images')) {
+            return;
+        }
+
+        $this->db->query(
+            'CREATE TABLE plot_images (
+                id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+                tenant_id INT UNSIGNED NOT NULL,
+                plot_id INT UNSIGNED NOT NULL,
+                stored VARCHAR(80) NOT NULL,
+                created_at DATETIME NULL,
+                deleted_at DATETIME NULL,
+                PRIMARY KEY (id),
+                KEY plot_images_plot (tenant_id, plot_id)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4'
+        );
     }
 
     /**
@@ -1515,7 +1684,7 @@ class SiteService
      *
      * @return list<array{at: string, action: string, title: string, who: string, meta: string, body: string}>
      */
-    public function leadActivity(int $tenantId, int $leadId): array
+    public function leadActivity(int $tenantId, int $leadId, ?string $from = null, ?string $to = null): array
     {
         $lead = $this->lead($tenantId, $leadId);
 
@@ -1780,8 +1949,21 @@ class SiteService
             return $a['action'] === 'created' ? -1 : 1;
         });
         usort($rest, $byTime);
+        $events = array_merge($pinned, $rest);
 
-        return array_merge($pinned, $rest);
+        return array_values(array_filter($events, static function (array $event) use ($from, $to): bool {
+            $day = substr((string) ($event['at'] ?? ''), 0, 10);
+
+            if ($from !== null && $from !== '' && ($day === '' || $day < $from)) {
+                return false;
+            }
+
+            if ($to !== null && $to !== '' && ($day === '' || $day > $to)) {
+                return false;
+            }
+
+            return true;
+        }));
     }
 
     /**

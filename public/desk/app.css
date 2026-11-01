@@ -475,7 +475,10 @@ th.num, td.num { text-align: right; }
 .push-counts strong { font-size: 28px; color: #0E8A4A; }
 .push-tabs { display: flex; gap: 8px; margin: 8px 0 12px; }
 .form-actions { display: flex; gap: 8px; margin-top: 12px; }
-.activity-filters { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(160px, 240px); gap: 12px; margin-bottom: 12px; }
+.activity-filters { display: grid; grid-template-columns: minmax(160px, 1fr) minmax(140px, 220px) 160px 160px; gap: 12px; margin-bottom: 12px; }
+.plot-photos { display: flex; flex-wrap: wrap; gap: 12px; }
+.plot-photos figure { margin: 0; display: grid; gap: 6px; justify-items: start; }
+.plot-photos img { width: 120px; height: 88px; object-fit: cover; border-radius: 8px; border: 1px solid #d7e0da; }
 .push-toggles { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 14px; }
 .push-toggles label { flex-direction: row; align-items: center; width: auto; margin: 0; padding: 8px 12px; border: 1px solid #d7e5dc; border-radius: 999px; background: #fff; color: #143D2C; font-weight: 600; font-size: 13px; cursor: pointer; }
 .push-toggles label.on { background: #E6F2EB; border-color: #0E8A4A; color: #145C32; }

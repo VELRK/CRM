@@ -698,6 +698,78 @@ class DeskApi extends BaseController
         });
     }
 
+    public function savePlotImage(int $id): ResponseInterface
+    {
+        if ($denied = $this->guard('plots.update')) {
+            return $denied;
+        }
+
+        return $this->run(function () use ($id) {
+            $plot = $this->sites->plot($this->tenant(), $id);
+
+            if ($plot === null || ! $this->projectAllowed((int) $plot['project_id'])) {
+                return $this->fail('That plot is not in this workspace.', 404);
+            }
+
+            $file = $this->request->getFile('image');
+
+            if ($file === null || ! $file->isValid()) {
+                throw new RuntimeException('Choose an image.');
+            }
+
+            $saved = $this->sites->savePlotImage($this->tenant(), $id, $file->getTempName());
+
+            return $this->ok($saved);
+        });
+    }
+
+    public function deletePlotImage(int $id, int $imageId): ResponseInterface
+    {
+        if ($denied = $this->guard('plots.update')) {
+            return $denied;
+        }
+
+        return $this->run(function () use ($id, $imageId) {
+            $plot = $this->sites->plot($this->tenant(), $id);
+
+            if ($plot === null || ! $this->projectAllowed((int) $plot['project_id'])) {
+                return $this->fail('That plot is not in this workspace.', 404);
+            }
+
+            $this->sites->deletePlotImage($this->tenant(), $id, $imageId);
+
+            return $this->ok(['id' => $imageId, 'deleted' => true]);
+        });
+    }
+
+    public function plotImage(int $id, string $stored): ResponseInterface
+    {
+        if ($denied = $this->guard('plots.view')) {
+            return $denied;
+        }
+
+        $plot = $this->sites->plot($this->tenant(), $id);
+
+        if ($plot === null || ! $this->projectAllowed((int) $plot['project_id'])) {
+            return $this->fail('That plot is not in this workspace.', 404);
+        }
+
+        $path = $this->sites->plotImagePath($this->tenant(), $id, $stored);
+
+        if ($path === null) {
+            return $this->fail('That image is not on this plot.', 404);
+        }
+
+        $mime = match (strtolower(pathinfo($path, PATHINFO_EXTENSION))) {
+            'png' => 'image/png',
+            'webp' => 'image/webp',
+            'gif' => 'image/gif',
+            default => 'image/jpeg',
+        };
+
+        return $this->response->setHeader('Content-Type', $mime)->setHeader('Cache-Control', 'private, max-age=60')->setBody((string) file_get_contents($path));
+    }
+
     public function plotHistory(int $id): ResponseInterface
     {
         if ($denied = $this->guard('plots.view')) {
@@ -1012,7 +1084,7 @@ class DeskApi extends BaseController
             return $this->fail('That lead is not in this workspace.', 404);
         }
 
-        return $this->ok($this->sites->leadActivity($this->tenant(), $id));
+        return $this->ok($this->sites->leadActivity($this->tenant(), $id, $this->dayQuery('from'), $this->dayQuery('to')));
     }
 
     public function transfer(int $id): ResponseInterface
@@ -1591,7 +1663,7 @@ class DeskApi extends BaseController
             return $denied;
         }
 
-        return $this->ok($this->desk->auditLog($this->tenant()));
+        return $this->ok($this->desk->auditLog($this->tenant(), $this->dayQuery('from'), $this->dayQuery('to')));
     }
 
     public function notifications(): ResponseInterface
@@ -2569,6 +2641,19 @@ class DeskApi extends BaseController
         }
 
         return $this->fail('Your role does not include that access.', 403);
+    }
+
+    private function dayQuery(string $key): ?string
+    {
+        $value = trim((string) $this->request->getGet($key));
+
+        if ($value === '') {
+            return null;
+        }
+
+        $day = \DateTime::createFromFormat('!Y-m-d', $value);
+
+        return $day instanceof \DateTime && $day->format('Y-m-d') === $value ? $value : null;
     }
 
     private function places(): AttendanceLocationService

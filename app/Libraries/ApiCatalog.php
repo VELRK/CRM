@@ -109,7 +109,7 @@ class ApiCatalog
             ], ['ok' => true, 'data' => [$lead], 'meta' => ['total' => 1]]),
             self::entry('Leads', 'FR-4.4', 'Duplicate phone check', 'POST', '/api/v1/leads/check', true, 'leads.view', ['phoneNumber' => '9840012345'], ['ok' => true, 'data' => ['duplicate' => true, 'lead' => $lead, 'timeline' => []]]),
             self::entry('Leads', 'FR-4.2', 'Create lead', 'POST', '/api/v1/leads', true, 'leads.create', $leadInput, ['ok' => true, 'data' => ['id' => 1]]),
-            self::entry('Leads', 'FR-4.6', 'Lead activity', 'GET', '/api/v1/leads/1/timeline', true, 'leads.view', null, ['ok' => true, 'data' => [
+            self::entry('Leads', 'FR-4.6', 'Lead activity', 'GET', '/api/v1/leads/1/timeline?from=2026-10-01&to=2026-10-31', true, 'leads.view', null, ['ok' => true, 'data' => [
                 ['at' => '2026-10-01 09:00:00', 'action' => 'created', 'title' => 'Lead created', 'who' => 'Priya', 'meta' => '01 Oct 2026, 09:00 · Priya', 'body' => 'Came in from Website. Stage New.'],
                 ['at' => '2026-10-01 09:00:00', 'action' => 'allocated', 'title' => 'Allocated', 'who' => 'Priya', 'meta' => '01 Oct 2026, 09:00 · Priya', 'body' => 'Allocated to Meena.'],
                 ['at' => '2026-10-24 11:00:00', 'action' => 'transferred', 'title' => 'Transferred', 'who' => 'Priya', 'meta' => '24 Oct 2026, 11:00 · Priya', 'body' => 'Meena → Arun. Bookings and registrations already recorded stay with Meena. New bookings and registrations count for Arun.'],
@@ -155,7 +155,7 @@ class ApiCatalog
             self::entry('Reports', 'FR-9.3', 'Attendance places', 'GET', '/api/v1/reports/attendance?month=2026-10', true, 'reports.view', null, ['ok' => true, 'data' => [['id' => 1, 'user_name' => 'Priya', 'work_date' => '2026-10-29', 'status' => 'present', 'check_in' => '2026-10-29 09:58:00', 'check_out' => '2026-10-29 18:05:00', 'check_in_place' => 'North gate', 'check_out_place' => 'North gate', 'check_in_lat' => '11.0168000', 'check_in_lng' => '76.9558000', 'check_out_lat' => '11.0168100', 'check_out_lng' => '76.9558100', 'entity_name' => 'Green Meadows']]]),
             self::entry('Reports', 'FR-13', 'Excel export', 'GET', '/api/v1/reports/excel', true, 'exports.download', null, ['file' => 'atrium-reports.xls']),
             self::entry('Reports', 'FR-13', 'PDF export', 'GET', '/api/v1/reports/pdf', true, 'exports.download', null, ['file' => 'atrium-reports.pdf']),
-            self::entry('Activity', 'FR-10', 'Activity log', 'GET', '/api/v1/activity', true, 'team.view', null, ['ok' => true, 'data' => [['id' => 9, 'user_name' => 'Priya', 'action' => 'plot.status', 'subject_type' => 'plot', 'subject_id' => 1, 'detail' => 'booked', 'created_at' => '2026-10-24 16:00:00']]]),
+            self::entry('Activity', 'FR-10', 'Activity log', 'GET', '/api/v1/activity?from=2026-10-01&to=2026-10-31', true, 'team.view', null, ['ok' => true, 'data' => [['id' => 9, 'user_name' => 'Priya', 'action' => 'plot.status', 'subject_type' => 'plot', 'subject_id' => 1, 'detail' => 'booked', 'created_at' => '2026-10-24 16:00:00']]]),
             self::entry('Notifications', 'FR-15', 'Register a phone', 'POST', '/api/v1/devices', true, null, [
                 'token' => 'fcm-device-token', 'platform' => 'android', 'name' => 'Pixel',
             ], ['ok' => true, 'data' => ['saved' => true]]),
@@ -211,6 +211,9 @@ class ApiCatalog
                 'expectedRegistrationOn' => '2026-12-08', 'registeredOn' => '', 'remarks' => 'Token received',
             ], ['ok' => true, 'data' => ['id' => 1, 'status' => 'booked', 'customer_name' => 'Ravi Kumar', 'customer_phone' => '9840012345', 'associate_name' => 'Priya', 'head_name' => 'Priya', 'advance_minor' => 5000000, 'booking_amount_minor' => 250000000, 'booking_on' => '2026-10-29']]),
             self::entry('Plots', 'FR-3.1', 'Delete plot', 'POST', '/api/v1/plots/1/delete', true, 'plots.delete', new \stdClass(), ['ok' => true, 'data' => ['id' => 1, 'deleted' => true]]),
+            self::entry('Plots', 'FR-3.7', 'Upload a plot image', 'POST', '/api/v1/plots/1/images', true, 'plots.update', ['image' => '(multipart field image, PNG JPG WebP or GIF, up to 8 MB, 12 images)'], ['ok' => true, 'data' => ['id' => 1, 'url' => '/api/v1/plots/1/images/abc.png']]),
+            self::entry('Plots', 'FR-3.7', 'Plot image file', 'GET', '/api/v1/plots/1/images/abc.png', true, 'plots.view', null, 'Image file'),
+            self::entry('Plots', 'FR-3.7', 'Remove a plot image', 'POST', '/api/v1/plots/1/images/1/delete', true, 'plots.update', new \stdClass(), ['ok' => true, 'data' => ['id' => 1, 'deleted' => true]]),
             self::entry('Leads', 'FR-4.2', 'Lead detail', 'GET', '/api/v1/leads/1', true, 'leads.view', null, ['ok' => true, 'data' => $lead]),
             self::entry('Leads', 'FR-4.2', 'Update lead', 'POST', '/api/v1/leads/1', true, 'leads.update', array_merge($leadInput, ['leadStage' => 'Qualified']), ['ok' => true, 'data' => ['id' => 1]]),
             self::entry('Leads', 'FR-4.2', 'Delete lead', 'POST', '/api/v1/leads/1/delete', true, 'leads.delete', new \stdClass(), ['ok' => true, 'data' => ['id' => 1, 'deleted' => true]]),

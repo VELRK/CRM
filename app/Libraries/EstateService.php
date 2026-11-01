@@ -338,11 +338,11 @@ class EstateService
 
         if ($this->db->tableExists('lead_tasks')) {
             $tasks = $this->applyUsers(
-                $this->db->table('lead_tasks')
+                $this->onlyLiveLeads($this->db->table('lead_tasks')
                     ->where('tenant_id', $tenantId)
                     ->where('deleted_at', null)
                     ->where('completed_date', null)
-                    ->whereNotIn('current_state', ['COMPLETED', 'CANCELLED', 'CANCELED']),
+                    ->whereNotIn('current_state', ['COMPLETED', 'CANCELLED', 'CANCELED']), $tenantId),
                 'assigned_to',
                 $userIds,
             )->countAllResults();
@@ -1235,13 +1235,13 @@ class EstateService
         $sources = $this->labelRows($tenantId, 'lead_source', $this->grouped($tenantId, 'leads', 'source', 'owner_id', $userIds), 'source');
         $leadStatus = $this->labelRows($tenantId, 'lead_status', $this->grouped($tenantId, 'leads', 'status', 'owner_id', $userIds), 'status');
         $visitStatus = $this->grouped($tenantId, 'site_visits', 'status', 'staff_id', $userIds);
-        $followSplit = $this->applyUsers($this->db->table('followups')
+        $followSplit = $this->applyUsers($this->onlyLiveLeads($this->db->table('followups')
             ->select(
                 "SUM(done_at IS NOT NULL) AS done, SUM(done_at IS NULL AND next_at IS NOT NULL AND next_at < " . $this->db->escape($now) . ") AS overdue, SUM(done_at IS NULL AND (next_at IS NULL OR next_at >= " . $this->db->escape($now) . ")) AS upcoming",
                 false,
             )
             ->where('tenant_id', $tenantId)
-            ->where('deleted_at', null), 'IFNULL(assigned_user_id, user_id)', $userIds)
+            ->where('deleted_at', null), $tenantId), 'IFNULL(assigned_user_id, user_id)', $userIds)
             ->get()
             ->getRowArray();
         $start = date('Y-m-d', strtotime('-13 days'));
@@ -1278,12 +1278,12 @@ class EstateService
             ->limit(6)
             ->get()
             ->getResultArray();
-        $visitedBuilder = $this->db->table('site_visits')->select('COUNT(DISTINCT lead_id) AS total', false)->where('tenant_id', $tenantId)->where('deleted_at', null);
+        $visitedBuilder = $this->onlyLiveLeads($this->db->table('site_visits')->select('COUNT(DISTINCT lead_id) AS total', false)->where('tenant_id', $tenantId)->where('deleted_at', null), $tenantId);
         $visited = (int) ($this->applyUsers($visitedBuilder, 'staff_id', $userIds)->get()->getRowArray()['total'] ?? 0);
         $booked = 0;
 
         if ($this->db->tableExists('sales')) {
-            $bookedBuilder = $this->db->table('sales')->select('COUNT(DISTINCT lead_id) AS total', false)->where('tenant_id', $tenantId)->where('deleted_at', null);
+            $bookedBuilder = $this->onlyLiveLeads($this->db->table('sales')->select('COUNT(DISTINCT lead_id) AS total', false)->where('tenant_id', $tenantId)->where('deleted_at', null), $tenantId);
             $booked = (int) ($this->applyUsers($bookedBuilder, 'credited_user_id', $userIds)->get()->getRowArray()['total'] ?? 0);
         }
 
@@ -1321,7 +1321,7 @@ class EstateService
         }
 
         $leadCount = $this->countWhere('leads', $tenantId, $userIds, 'owner_id');
-        $dueBuilder = $this->db->table('followups f')->select('f.body, f.next_at, l.name AS lead_name')->join('leads l', 'l.id = f.lead_id')->where('f.tenant_id', $tenantId)->where('f.deleted_at', null)->where('f.done_at', null)->where('f.next_at <=', date('Y-m-d 23:59:59'));
+        $dueBuilder = $this->db->table('followups f')->select('f.body, f.next_at, l.name AS lead_name')->join('leads l', 'l.id = f.lead_id')->where('f.tenant_id', $tenantId)->where('f.deleted_at', null)->where('l.deleted_at', null)->where('f.done_at', null)->where('f.next_at <=', date('Y-m-d 23:59:59'));
         $performance = $this->performance($tenantId, $userIds, is_array($scope) ? ($scope['team_ids'] ?? null) : null, $now);
 
         return [
@@ -1569,8 +1569,12 @@ class EstateService
     {
         $builder = $this->db->table($table)->where('tenant_id', $tenantId);
 
-        if (in_array($table, ['leads', 'followups', 'site_visits', 'sales', 'plots'], true)) {
+        if (in_array($table, ['leads', 'followups', 'site_visits', 'sales', 'plots', 'lead_tasks'], true)) {
             $builder->where('deleted_at', null);
+        }
+
+        if (in_array($table, ['followups', 'site_visits', 'lead_tasks', 'sales'], true)) {
+            $this->onlyLiveLeads($builder, $tenantId);
         }
 
         if ($extra !== null) {
@@ -1594,6 +1598,10 @@ class EstateService
             $builder->where('deleted_at', null);
         }
 
+        if (in_array($table, ['followups', 'site_visits', 'lead_tasks', 'sales'], true)) {
+            $this->onlyLiveLeads($builder, $tenantId);
+        }
+
         if ($extra !== null) {
             $builder->where($extra, null, false);
         }
@@ -1610,6 +1618,17 @@ class EstateService
     /**
      * @param ?list<int> $userIds
      */
+    private function onlyLiveLeads(\CodeIgniter\Database\BaseBuilder $builder, int $tenantId, string $column = 'lead_id'): \CodeIgniter\Database\BaseBuilder
+    {
+        $leads = $this->db->prefixTable('leads');
+
+        return $builder->where(
+            $column . ' IN (SELECT id FROM ' . $leads . ' WHERE tenant_id = ' . (int) $tenantId . ' AND deleted_at IS NULL)',
+            null,
+            false,
+        );
+    }
+
     private function applyUsers(\CodeIgniter\Database\BaseBuilder $builder, string $column, ?array $userIds): \CodeIgniter\Database\BaseBuilder
     {
         if ($userIds === null) {
@@ -1635,6 +1654,10 @@ class EstateService
             ->select($column . ', COUNT(*) AS total')
             ->where('tenant_id', $tenantId)
             ->where('deleted_at', null);
+
+        if (in_array($table, ['followups', 'site_visits', 'lead_tasks', 'sales'], true)) {
+            $this->onlyLiveLeads($builder, $tenantId);
+        }
 
         return $this->applyUsers($builder, $userColumn ?? $column, $userColumn === null ? null : $userIds)
             ->groupBy($column)

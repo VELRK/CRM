@@ -162,18 +162,28 @@ class DeskService
     /**
      * @return list<array<string, mixed>>
      */
-    public function auditLog(int $tenantId): array
+    public function auditLog(int $tenantId, ?string $from = null, ?string $to = null): array
     {
         if (! $this->db->tableExists('audit_logs')) {
             return [];
         }
 
-        return $this->db->table('audit_logs')
+        $builder = $this->db->table('audit_logs')
             ->select('audit_logs.*, users.name AS user_name')
             ->join('users', 'users.id = audit_logs.user_id', 'left')
-            ->where('audit_logs.tenant_id', $tenantId)
+            ->where('audit_logs.tenant_id', $tenantId);
+
+        if ($from !== null && $from !== '') {
+            $builder->where('audit_logs.created_at >=', $from . ' 00:00:00');
+        }
+
+        if ($to !== null && $to !== '') {
+            $builder->where('audit_logs.created_at <=', $to . ' 23:59:59');
+        }
+
+        return $builder
             ->orderBy('audit_logs.id', 'DESC')
-            ->limit(100)
+            ->limit(500)
             ->get()
             ->getResultArray();
     }
