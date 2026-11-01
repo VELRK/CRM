@@ -9,6 +9,8 @@ $routes->post('login', 'AuthController::login');
 $routes->get('register', 'AuthController::registerForm');
 $routes->post('register', 'AuthController::register');
 $routes->post('logout', 'AuthController::logout');
+$routes->get('cron/reminders', 'CronController::reminders');
+$routes->post('cron/reminders', 'CronController::reminders');
 $routes->get('join/(:segment)', 'AuthController::joinForm/$1');
 $routes->post('join/(:segment)', 'AuthController::join/$1');
 

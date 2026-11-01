@@ -292,6 +292,9 @@ class EstateController extends PortalController
             'active'    => 'whatsapp',
             'templates' => $this->estate->templates($this->tenantId),
             'phone'     => $this->estate->setting($this->tenantId, 'whatsapp_phone') ?? '',
+            'followupReminder' => $this->estate->setting($this->tenantId, 'whatsapp_followup_reminder') ?? '',
+            'visitReminder'    => $this->estate->setting($this->tenantId, 'whatsapp_visit_reminder') ?? '',
+            'taskReminder'     => $this->estate->setting($this->tenantId, 'whatsapp_task_reminder') ?? '',
             'open'      => old('form') === 'template',
         ]);
     }
@@ -311,7 +314,11 @@ class EstateController extends PortalController
             $this->estate->saveSetting($this->tenantId, 'whatsapp_token', $token);
         }
 
-        return redirect()->to('/app/whatsapp')->with('message', 'WhatsApp settings saved. Sending stays off until a provider is connected.');
+        $this->estate->saveSetting($this->tenantId, 'whatsapp_followup_reminder', trim((string) $this->request->getPost('whatsapp_followup_reminder')));
+        $this->estate->saveSetting($this->tenantId, 'whatsapp_visit_reminder', trim((string) $this->request->getPost('whatsapp_visit_reminder')));
+        $this->estate->saveSetting($this->tenantId, 'whatsapp_task_reminder', trim((string) $this->request->getPost('whatsapp_task_reminder')));
+
+        return redirect()->to('/app/whatsapp')->with('message', 'WhatsApp settings saved. Messages go out through AskEva.');
     }
 
     public function saveTemplate(?int $id = null)

@@ -18,6 +18,9 @@ class PushService
         'visit.scheduled'    => ['module' => 'Visits', 'label' => 'Site visit scheduled'],
         'task.assigned'      => ['module' => 'Tasks', 'label' => 'Task assigned'],
         'task.completed'     => ['module' => 'Tasks', 'label' => 'Task completed'],
+        'followup.reminder'  => ['module' => 'Follow-ups', 'label' => 'Follow-up reminder'],
+        'visit.reminder'     => ['module' => 'Visits', 'label' => 'Site visit reminder'],
+        'task.reminder'      => ['module' => 'Tasks', 'label' => 'Task reminder'],
         'attendance.marked'  => ['module' => 'Attendance', 'label' => 'Attendance marked'],
         'manual'             => ['module' => 'Announcement', 'label' => 'Announcement'],
     ];
@@ -121,6 +124,79 @@ class PushService
         }
 
         return $sent;
+    }
+
+    public function remindUser(int $tenantId, int $userId, string $event, string $title, string $message, string $subjectType, int $subjectId): void
+    {
+        if ($userId < 1 || ! $this->member($tenantId, $userId)) {
+            return;
+        }
+
+        $now = date('Y-m-d H:i:s');
+        $noticeId = $this->notice($tenantId, $userId, $title, $message, $subjectType, $subjectId);
+        $devices = $this->db->tableExists('mobile_device_tokens') ? $this->devices($tenantId, $userId) : [];
+
+        if (! $this->db->tableExists('notification_logs')) {
+            foreach ($devices as $device) {
+                $this->sendFcm((string) $device['device_token'], $title, $message, [
+                    'event'        => $event,
+                    'kind'         => 'text',
+                    'subject_type' => $subjectType,
+                    'subject_id'   => (string) $subjectId,
+                ]);
+            }
+
+            return;
+        }
+
+        $this->ensureMediaColumns();
+        $this->db->table('notification_logs')->insert([
+            'tenant_id'        => $tenantId,
+            'template_id'      => null,
+            'event_key'        => $event,
+            'kind'             => 'text',
+            'media'            => null,
+            'title'            => mb_substr($title, 0, 190),
+            'message'          => mb_substr($message, 0, 500),
+            'subject_type'     => $subjectType,
+            'subject_id'       => $subjectId > 0 ? $subjectId : null,
+            'triggered_by'     => null,
+            'total_recipients' => max(1, count($devices)),
+            'successful_count' => 0,
+            'failed_count'     => 0,
+            'created_at'       => $now,
+        ]);
+        $logId = (int) $this->db->insertID();
+        $sent = 0;
+        $failed = 0;
+
+        if ($devices === []) {
+            $this->recipientRow($tenantId, $logId, $userId, null, $noticeId, 'failed', null, 'No active device.', null);
+            $failed = 1;
+        }
+
+        foreach ($devices as $device) {
+            $result = $this->sendFcm((string) $device['device_token'], $title, $message, [
+                'event'        => $event,
+                'kind'         => 'text',
+                'subject_type' => $subjectType,
+                'subject_id'   => (string) $subjectId,
+            ]);
+
+            if (! empty($result['drop'])) {
+                $this->db->table('mobile_device_tokens')->where('id', (int) $device['id'])->update(['is_active' => 0, 'updated_at' => $now]);
+            }
+
+            $ok = ! empty($result['ok']);
+            $this->recipientRow($tenantId, $logId, $userId, (int) $device['id'], $noticeId, $ok ? 'sent' : 'failed', $result['id'] ?? null, $ok ? null : (string) ($result['error'] ?? 'The phone could not be reached.'), $ok ? $now : null);
+            $ok ? $sent++ : $failed++;
+        }
+
+        $this->db->table('notification_logs')->where('id', $logId)->update([
+            'total_recipients' => max(1, $sent + $failed),
+            'successful_count' => $sent,
+            'failed_count'     => $failed,
+        ]);
     }
 
     /**

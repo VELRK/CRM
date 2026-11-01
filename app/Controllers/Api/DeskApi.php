@@ -2102,9 +2102,7 @@ class DeskApi extends BaseController
         }
 
         return $this->run(function () use ($id) {
-            $this->estate->queueMessage($this->tenant(), $this->user(), $id, (int) ($this->input()['template_id'] ?? 0));
-
-            return $this->ok(['status' => 'failed', 'detail' => 'Stored on the lead. Not delivered because WhatsApp is not connected.']);
+            return $this->ok($this->estate->queueMessage($this->tenant(), $this->user(), $id, (int) ($this->input()['template_id'] ?? 0)));
         });
     }
 

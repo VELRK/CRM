@@ -1151,7 +1151,10 @@ class EstateService
         $this->db->table('whatsapp_templates')->where('tenant_id', $tenantId)->where('id', $id)->update($data);
     }
 
-    public function queueMessage(int $tenantId, int $userId, int $leadId, int $templateId): void
+    /**
+     * @return array{status: string, detail: string}
+     */
+    public function queueMessage(int $tenantId, int $userId, int $leadId, int $templateId): array
     {
         $lead = $this->db->table('leads')->where('tenant_id', $tenantId)->where('id', $leadId)->where('deleted_at', null)->get()->getRowArray();
         $template = $this->db->table('whatsapp_templates')->where('tenant_id', $tenantId)->where('id', $templateId)->where('deleted_at', null)->get()->getRowArray();
@@ -1161,10 +1164,18 @@ class EstateService
         }
 
         $phone = (string) ($lead['phone_number'] ?? $lead['phone'] ?? '');
+        $name = (string) ($lead['name'] ?? '');
+        $askeva = new AskEva();
+        $values = $askeva->values((string) $template['body'], [
+            'name' => $name, 'clientname' => $name, 'phone' => $phone, 'number' => $phone,
+        ], ['name']);
         $body = strtr((string) $template['body'], [
-            '{{name}}'  => (string) $lead['name'],
-            '{{phone}}' => $phone,
+            '{{name}}'       => $name,
+            '{{clientname}}' => $name,
+            '{{phone}}'      => $phone,
+            '{{number}}'     => $phone,
         ]);
+        $result = $askeva->sendTemplate((string) ($this->setting($tenantId, 'whatsapp_token') ?? ''), $phone, (string) $template['name'], (string) ($template['language'] ?? 'en'), $values);
         $this->db->table('whatsapp_messages')->insert([
             'tenant_id'   => $tenantId,
             'lead_id'     => $leadId,
@@ -1174,9 +1185,14 @@ class EstateService
             'to_phone'    => $phone,
             'subject'     => (string) $template['name'],
             'body'        => $body,
-            'status'      => 'failed',
+            'status'      => $result['ok'] ? 'sent' : 'failed',
             'created_at'  => date('Y-m-d H:i:s'),
         ]);
+
+        return [
+            'status' => $result['ok'] ? 'sent' : 'failed',
+            'detail' => $result['ok'] ? 'Sent through AskEva.' : $result['error'],
+        ];
     }
 
     /**
