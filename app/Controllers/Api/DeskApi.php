@@ -1350,7 +1350,8 @@ class DeskApi extends BaseController
                 $this->tenant(),
                 $id,
                 (string) ($input['callFeedback'] ?? $input['feedback'] ?? ''),
-                (string) ($input['experience'] ?? '')
+                (string) ($input['experience'] ?? ''),
+                (string) ($input['notes'] ?? $input['callNotes'] ?? '')
             );
 
             return $this->ok(['id' => $id, 'status' => 'COMPLETED']);
@@ -1538,8 +1539,9 @@ class DeskApi extends BaseController
         }
 
         return $this->run(function () use ($id) {
+            $input = $this->input();
             $task = db_connect()->table('lead_tasks')->select('assigned_to, subject')->where('tenant_id', $this->tenant())->where('id', $id)->get()->getRowArray();
-            $this->sites->completeTask($this->tenant(), $id);
+            $this->sites->completeTask($this->tenant(), $id, (string) ($input['taskFeedback'] ?? $input['feedback'] ?? ''));
             $assigned = (int) ($task['assigned_to'] ?? 0);
             $this->alert('task.completed', [
                 'subject_user_id' => $assigned,

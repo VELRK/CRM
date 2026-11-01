@@ -243,7 +243,7 @@ class ApiCatalog
                 'status' => 'SCHEDULED', 'assignee' => 'Priya', 'range' => 'this_week', 'q' => 'brochure',
             ], ['ok' => true, 'data' => [['id' => 1, 'subject' => 'Send brochure', 'display_status' => 'SCHEDULED']], 'meta' => ['total' => 1]]),
             self::entry('Tasks', 'FR-6.4', 'Create task', 'POST', '/api/v1/tasks', true, 'followups.create', ['leadId' => 1, 'subject' => 'Send brochure', 'priority' => 'MEDIUM', 'scheduledDateTime' => '2026-10-30T15:00', 'assignedTo' => 2, 'description' => 'Email the east-row brochure'], ['ok' => true, 'data' => ['id' => 2]]),
-            self::entry('Tasks', 'FR-6.4', 'Mark task done', 'POST', '/api/v1/tasks/1/done', true, 'followups.create', new \stdClass(), ['ok' => true, 'data' => ['id' => 1, 'status' => 'COMPLETED']]),
+            self::entry('Tasks', 'FR-6.4', 'Mark task done', 'POST', '/api/v1/tasks/1/done', true, 'followups.create', ['taskFeedback' => 'Brochure sent to the customer'], ['ok' => true, 'data' => ['id' => 1, 'status' => 'COMPLETED']]),
             self::entry('Tasks', 'FR-6.4', 'Reschedule task', 'POST', '/api/v1/tasks/1/reschedule', true, 'followups.create', ['scheduledDateTime' => '2026-10-31T15:00'], ['ok' => true, 'data' => ['id' => 1, 'status' => 'SCHEDULED']]),
             self::entry('Notifications', 'FR-15', 'Mark one read', 'POST', '/api/v1/notifications/1/read', true, null, new \stdClass(), ['ok' => true, 'data' => ['id' => 1]]),
             self::entry('Access', 'Roles', 'Permission catalog', 'GET', '/api/v1/access', true, 'roles.manage', null, ['ok' => true, 'data' => ['Leads' => ['leads.view', 'leads.create']]]),

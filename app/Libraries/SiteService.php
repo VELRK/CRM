@@ -1613,11 +1613,12 @@ class SiteService
         return (int) $this->db->insertID();
     }
 
-    public function completeFollowup(int $tenantId, int $id, string $feedback, string $experience): void
+    public function completeFollowup(int $tenantId, int $id, string $feedback, string $experience, string $notes = ''): void
     {
         $this->ensureWorkflowColumns();
         (new EstateService($this->db))->assertCatalogValue($tenantId, 'call_feedback', $feedback);
         $experience = $this->experienceWord($experience);
+        $notes = trim($notes);
         $row = $this->db->table('followups')
             ->where('tenant_id', $tenantId)
             ->where('id', $id)
@@ -1641,6 +1642,7 @@ class SiteService
             'current_state'  => 'COMPLETED',
             'call_feedback'  => $feedback,
             'experience'     => $experience,
+            'call_notes'     => $notes !== '' ? $notes : null,
         ]);
     }
 
@@ -1737,11 +1739,23 @@ class SiteService
         return (int) $this->db->insertID();
     }
 
-    public function completeTask(int $tenantId, int $id): void
+    public function completeTask(int $tenantId, int $id, string $feedback): void
     {
+        $this->ensureWorkflowColumns();
+        $feedback = trim($feedback);
+
+        if ($feedback === '') {
+            throw new RuntimeException('Enter the task feedback.');
+        }
+
+        if (strlen($feedback) > 2000) {
+            throw new RuntimeException('Keep the task feedback under 2000 characters.');
+        }
+
         $this->touchTask($tenantId, $id, [
             'current_state'  => 'COMPLETED',
             'completed_date' => date('Y-m-d H:i:s'),
+            'task_feedback'  => $feedback,
         ]);
     }
 
@@ -2614,6 +2628,8 @@ class SiteService
         $this->addColumn('leads', 'approved_at', 'DATETIME NULL');
         $this->addColumn('followups', 'call_feedback', 'VARCHAR(80) NULL');
         $this->addColumn('followups', 'experience', 'VARCHAR(16) NULL');
+        $this->addColumn('followups', 'call_notes', 'TEXT NULL');
+        $this->addColumn('lead_tasks', 'task_feedback', 'TEXT NULL');
         $this->addColumn('site_visits', 'visit_feedback', 'VARCHAR(80) NULL');
         $this->addColumn('site_visits', 'experience', 'VARCHAR(16) NULL');
         $this->addColumn('site_visits', 'visit_note', 'TEXT NULL');

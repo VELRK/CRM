@@ -866,28 +866,43 @@ function FilterDialog({ title, draft, setDraft, activity, stages, sources, proje
 }
 const EXPERIENCE = ['Excellent', 'Good', 'Fair', 'Poor'];
 function FeedbackBox({ kind, onClose, onSave }) {
-    const path = kind === 'visits' ? '/api/v1/visit-feedback?active=1' : '/api/v1/call-feedback?active=1';
+    const isVisit = kind === 'visits';
+    const isTask = kind === 'tasks';
+    const path = isVisit ? '/api/v1/visit-feedback?active=1' : '/api/v1/call-feedback?active=1';
     const [items, setItems] = useState([]);
     const [feedback, setFeedback] = useState('');
     const [experience, setExperience] = useState('');
     const [note, setNote] = useState('');
     const [error, setError] = useState('');
-    useEffect(() => { call(path).then((rows) => setItems(Array.isArray(rows) ? rows : [])).catch((e) => setError(e.message)); }, [path]);
+    useEffect(() => {
+        if (isTask) return;
+        call(path).then((rows) => setItems(Array.isArray(rows) ? rows : [])).catch((e) => setError(e.message));
+    }, [path]);
     async function submit(event) {
         event.preventDefault();
-        if (!feedback) return setError('Choose a feedback.');
+        if (isTask) {
+            if (!note.trim()) return setError('Enter the task feedback.');
+            setError('');
+            try { await onSave({ feedback: note.trim(), taskFeedback: note.trim() }); }
+            catch (e) { setError(e.message); }
+            return;
+        }
+        if (!feedback) return setError(isVisit ? 'Choose the visit feedback.' : 'Choose the call feedback.');
         if (!experience) return setError('Choose the overall experience.');
         setError('');
-        try { await onSave({ feedback, experience, visitNote: note }); }
+        try { await onSave({ feedback, experience, visitNote: note, notes: note }); }
         catch (e) { setError(e.message); }
     }
+    const title = isTask ? 'Complete task' : isVisit ? 'Complete visit' : 'Complete follow-up';
     return html`<div class="modal-back" onClick=${onClose}><form class="filter-box" onClick=${(event) => event.stopPropagation()} onSubmit=${submit}>
-        <header><h2>${kind === 'visits' ? 'Complete visit' : 'Complete follow-up'}</h2><button class="filter-x" type="button" onClick=${onClose}>×</button></header>
+        <header><h2>${title}</h2><button class="filter-x" type="button" onClick=${onClose}>×</button></header>
         <div class="filter-body">
             ${error ? html`<p class="error">${error}</p>` : null}
-            <label>${kind === 'visits' ? 'Visit feedback' : 'Call feedback'}<select value=${feedback} onChange=${(event) => setFeedback(event.target.value)}><option value="">Select</option>${items.map((row) => html`<option key=${row.id} value=${row.name}>${row.name}</option>`)}</select></label>
-            <label>Overall experience<select value=${experience} onChange=${(event) => setExperience(event.target.value)}><option value="">Select</option>${EXPERIENCE.map((item) => html`<option key=${item} value=${item}>${item}</option>`)}</select></label>
-            ${kind === 'visits' ? html`<label>Visit note<textarea value=${note} onInput=${(event) => setNote(event.target.value)}></textarea></label>` : null}
+            ${isTask ? html`<label>Task feedback<textarea value=${note} placeholder="What happened" onInput=${(event) => setNote(event.target.value)}></textarea></label>` : html`
+                <label>${isVisit ? 'Visit feedback' : 'Call feedback'}<select value=${feedback} onChange=${(event) => setFeedback(event.target.value)}><option value="">Select</option>${items.map((row) => html`<option key=${row.id} value=${row.name}>${row.name}</option>`)}</select></label>
+                <label>Overall experience<select value=${experience} onChange=${(event) => setExperience(event.target.value)}><option value="">Select</option>${EXPERIENCE.map((item) => html`<option key=${item} value=${item}>${item}</option>`)}</select></label>
+                <label>${isVisit ? 'Description' : 'Notes'}<textarea value=${note} onInput=${(event) => setNote(event.target.value)}></textarea></label>
+            `}
         </div>
         <footer><button class="ghost" type="button" onClick=${onClose}>Cancel</button><button class="primary" type="submit">Save</button></footer>
     </form></div>`;
@@ -943,12 +958,7 @@ function Board({ kind, title, rows, onReload, onRow, onOpen, onEdit, onDelete, a
     const base = kind === 'calls' ? '/api/v1/followups/' : kind === 'visits' ? '/api/v1/visits/' : '/api/v1/tasks/';
     async function done(row, event) {
         event.stopPropagation();
-        if (kind === 'calls' || kind === 'visits') { setFeedbackRow(row); return; }
-        setError('');
-        setBusy(row.id);
-        try { await call(base + row.id + '/done', { method: 'POST', body: {} }); onReload(); }
-        catch (e) { setError(e.message); }
-        setBusy(0);
+        setFeedbackRow(row);
     }
     async function saveFeedback(body) {
         await call(base + feedbackRow.id + '/done', { method: 'POST', body });
@@ -1026,7 +1036,7 @@ function Board({ kind, title, rows, onReload, onRow, onOpen, onEdit, onDelete, a
                 </div>
             </form>
         </div>` : null}
-        ${feedbackRow ? html`<${FeedbackBox} kind=${kind} onClose=${() => setFeedbackRow(null)} onSave=${saveFeedback} />` : null}
+        ${feedbackRow ? html`<${FeedbackBox} kind=${kind === 'visits' ? 'visits' : kind === 'tasks' ? 'tasks' : 'calls'} onClose=${() => setFeedbackRow(null)} onSave=${saveFeedback} />` : null}
         <div class="table-card"><table class="board-table">
             <thead><tr>
                 ${kind === 'leads' ? html`<th>Lead name</th><th>Phone no</th><th>Project</th><th>Assigned to</th><th>Lead stage</th><th>Lead source</th><th>Modified date</th><th>Created on</th>${onEdit || onDelete ? html`<th></th>` : null}` : null}
@@ -1193,13 +1203,10 @@ function LeadPage({ leadId, onBack, user }) {
         } catch (e) { setError(e.message); }
     }
     async function finish(kind, row) {
-        if (kind === 'followups' || kind === 'visits') { setFeedbackRow({ kind, row }); return; }
-        setError('');
-        try { await call('/api/v1/tasks/' + row.id + '/done', { method: 'POST', body: {} }); load(); }
-        catch (e) { setError(e.message); }
+        setFeedbackRow({ kind, row });
     }
     async function saveFeedback(body) {
-        const base = feedbackRow.kind === 'visits' ? '/api/v1/visits/' : '/api/v1/followups/';
+        const base = feedbackRow.kind === 'visits' ? '/api/v1/visits/' : feedbackRow.kind === 'tasks' ? '/api/v1/tasks/' : '/api/v1/followups/';
         await call(base + feedbackRow.row.id + '/done', { method: 'POST', body });
         setFeedbackRow(null);
         load();
@@ -1363,7 +1370,7 @@ function LeadPage({ leadId, onBack, user }) {
         ${editor === 'visit' ? html`<${VisitForm} leadId=${leadId} leadName=${lead.name} onDone=${() => savedActivity('visits')} onClose=${() => setEditor('')} />` : null}
         ${editor === 'task' ? html`<${TaskForm} leadId=${leadId} leadName=${lead.name} onDone=${() => savedActivity('tasks')} onClose=${() => setEditor('')} />` : null}
         ${editor === 'whatsapp' ? html`<${SendWhatsApp} lead=${lead} onDone=${() => setEditor('')} onClose=${() => setEditor('')} />` : null}
-        ${feedbackRow ? html`<${FeedbackBox} kind=${feedbackRow.kind === 'visits' ? 'visits' : 'calls'} onClose=${() => setFeedbackRow(null)} onSave=${saveFeedback} />` : null}
+        ${feedbackRow ? html`<${FeedbackBox} kind=${feedbackRow.kind === 'visits' ? 'visits' : feedbackRow.kind === 'tasks' ? 'tasks' : 'calls'} onClose=${() => setFeedbackRow(null)} onSave=${saveFeedback} />` : null}
     </div>`;
 }
 const PLOT_LABEL = { available: 'Available', advance: 'Advance', booked: 'Booked', sold: 'Sold', owner_use: 'Owner use', future: 'Future', registered: 'Registered', hold: 'Hold', blocked: 'Blocked' };
@@ -3687,46 +3694,60 @@ function PushBoard() {
 }
 function MasterBoard({ title, spec, user }) {
     const [rows, setRows] = useState([]);
-    const [name, setName] = useState('');
-    const [editing, setEditing] = useState(null);
+    const [form, setForm] = useState(null);
+    const [pending, setPending] = useState(null);
     const [error, setError] = useState('');
     const canWrite = allows(user, 'masters.manage');
     function load() { call(spec.path).then((list) => setRows(Array.isArray(list) ? list : [])).catch((e) => setError(e.message)); }
     useEffect(() => { load(); }, [spec.path]);
     async function save(event) {
         event.preventDefault();
-        const label = (editing ? editing.name : name).trim();
+        const label = String(form?.name || '').trim();
         if (!label) return setError('Enter a name.');
         setError('');
         try {
-            await call(editing ? spec.path + '/' + editing.id : spec.path, { method: 'POST', body: { name: label, active: editing ? editing.active : true } });
-            setName('');
-            setEditing(null);
+            await call(form.id ? spec.path + '/' + form.id : spec.path, { method: 'POST', body: { name: label, active: form.active !== false } });
+            setForm(null);
             load();
         } catch (e) { setError(e.message); }
     }
-    async function remove(row) {
+    async function confirm(event) {
+        event.preventDefault();
+        if (!pending) return;
         setError('');
-        try { await call(spec.path + '/' + row.id + '/delete', { method: 'POST', body: {} }); load(); }
-        catch (e) { setError(e.message); }
+        try {
+            if (pending.action === 'delete') await call(spec.path + '/' + pending.row.id + '/delete', { method: 'POST', body: {} });
+            else await call(spec.path + '/' + pending.row.id, { method: 'POST', body: { name: pending.row.name, active: false } });
+            setPending(null);
+            load();
+        } catch (e) { setError(e.message); }
     }
-    async function toggle(row) {
+    async function show(row) {
         setError('');
-        try { await call(spec.path + '/' + row.id, { method: 'POST', body: { name: row.name, active: !row.active } }); load(); }
+        try { await call(spec.path + '/' + row.id, { method: 'POST', body: { name: row.name, active: true } }); load(); }
         catch (e) { setError(e.message); }
     }
     return html`<section>
-        <p class="lede">${spec.lede}</p>
-        ${error ? html`<p class="error">${error}</p>` : null}
-        ${canWrite ? html`<form class="master-form" onSubmit=${save}>
-            <input value=${editing ? editing.name : name} placeholder=${'Add ' + title.toLowerCase()} onInput=${(event) => editing ? setEditing({ ...editing, name: event.target.value }) : setName(event.target.value)} />
-            <button class="primary" type="submit">${editing ? 'Save' : 'Add'}</button>
-            ${editing ? html`<button class="ghost" type="button" onClick=${() => setEditing(null)}>Cancel</button>` : null}
-        </form>` : null}
+        <div class="card-head"><div><p class="lede">${spec.lede}</p></div>${canWrite ? html`<button class="primary" type="button" onClick=${() => { setError(''); setForm({ id: 0, name: '', active: true }); }}>Add</button>` : null}</div>
+        ${error && !form && !pending ? html`<p class="error">${error}</p>` : null}
         <div class="table-card"><table class="board-table">
             <thead><tr><th>Name</th><th>Status</th>${canWrite ? html`<th></th>` : null}</tr></thead>
-            <tbody>${rows.map((row) => html`<tr key=${row.id}><td>${row.name}</td><td>${row.active ? 'Active' : 'Hidden'}</td>${canWrite ? html`<td class="row-actions"><button type="button" class="ghost" onClick=${() => setEditing({ ...row })}>Edit</button><button type="button" class="ghost" onClick=${() => toggle(row)}>${row.active ? 'Hide' : 'Show'}</button><button type="button" class="ghost" onClick=${() => remove(row)}>Delete</button></td>` : null}</tr>`)}</tbody>
+            <tbody>${rows.length === 0 ? html`<tr><td colSpan=${canWrite ? 3 : 2}>Nothing in this list yet</td></tr>` : rows.map((row) => html`<tr key=${row.id}><td>${row.name}</td><td>${row.active ? 'Active' : 'Hidden'}</td>${canWrite ? html`<td class="row-actions"><button type="button" class="ghost" onClick=${() => { setError(''); setForm({ id: row.id, name: row.name, active: !!row.active }); }}>Edit</button>${row.active ? html`<button type="button" class="ghost" onClick=${() => { setError(''); setPending({ action: 'hide', row }); }}>Hide</button>` : html`<button type="button" class="ghost" onClick=${() => show(row)}>Show</button>`}<button type="button" class="ghost" onClick=${() => { setError(''); setPending({ action: 'delete', row }); }}>Delete</button></td>` : null}</tr>`)}</tbody>
         </table></div>
+        ${form ? html`<div class="modal-back" onClick=${() => { setForm(null); setError(''); }}><form class="filter-box" onClick=${(event) => event.stopPropagation()} onSubmit=${save}>
+            <header><h2>${form.id ? 'Edit ' + title.toLowerCase() : 'Add ' + title.toLowerCase()}</h2><button class="filter-x" type="button" onClick=${() => { setForm(null); setError(''); }}>×</button></header>
+            <div class="filter-body">
+                ${error ? html`<p class="error">${error}</p>` : null}
+                <label>Name<input value=${form.name} onInput=${(event) => setForm({ ...form, name: event.target.value })} required /></label>
+            </div>
+            <footer><button class="ghost" type="button" onClick=${() => { setForm(null); setError(''); }}>Cancel</button><button class="primary" type="submit">${form.id ? 'Update' : 'Add'}</button></footer>
+        </form></div>` : null}
+        ${pending ? html`<div class="modal-back" onClick=${() => { setPending(null); setError(''); }}><form class="form-card modal-card confirm-card" onClick=${(event) => event.stopPropagation()} onSubmit=${confirm}>
+            <h2>${pending.action === 'delete' ? 'Delete ' + pending.row.name + '?' : 'Hide ' + pending.row.name + '?'}</h2>
+            <p class="lede">${pending.action === 'delete' ? 'This removes it from the list.' : 'Hidden values stay out of the dropdowns until you show them again.'}</p>
+            ${error ? html`<p class="error">${error}</p>` : null}
+            <div class="row-actions"><button class=${pending.action === 'delete' ? 'danger' : 'primary'} type="submit">${pending.action === 'delete' ? 'Delete' : 'Hide'}</button><button class="ghost" type="button" onClick=${() => { setPending(null); setError(''); }}>Cancel</button></div>
+        </form></div>` : null}
     </section>`;
 }
 function DealsBoard({ user }) {
