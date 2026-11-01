@@ -165,9 +165,6 @@ class AccessCatalog
             'WhatsApp' => [
                 ['key' => 'whatsapp.manage', 'label' => 'Manage WhatsApp templates'],
             ],
-            'Push alerts' => [
-                ['key' => 'notifications.manage', 'label' => 'Manage push alerts'],
-            ],
             'Downloads' => [
                 ['key' => 'exports.download', 'label' => 'Download lists'],
             ],

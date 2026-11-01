@@ -28,7 +28,6 @@ const screenAccess = {
     incentives: 'incentives.view',
     activity: 'team.view',
     whatsapp: 'whatsapp.manage',
-    push: 'notifications.manage',
     api: 'workspace.settings',
     settings: 'workspace.settings',
     deals: 'deals.view',
@@ -47,7 +46,7 @@ const nav = [
     ['Sites', [['Projects', 'projects']]],
     ['Sales', [['Leads', 'leads'], ['Deals', 'deals'], ['Follow-ups', 'followups'], ['Visits', 'visits'], ['Tasks', 'tasks']]],
     ['Office', [['Attendance', 'attendance'], ['Locations', 'locations'], ['Incentives', 'incentives']]],
-    ['Insight', [['Activity', 'activity'], ['Notifications', 'notifications'], ['Push alerts', 'push'], ['WhatsApp', 'whatsapp'], ['API console', 'api']]],
+    ['Insight', [['Activity', 'activity'], ['Notifications', 'notifications'], ['WhatsApp', 'whatsapp'], ['API console', 'api']]],
 ];
 const modules = nav.flatMap((group) => group[1]);
 
@@ -156,6 +155,7 @@ function actIcon(kind, label, onClick, wide) {
         edit: html`<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/>`,
         delete: html`<path d="M4 7h16"/><path d="M9 7V5h6v2"/><path d="M7 7l1 13h8l1-13"/>`,
         update: html`<path d="M21 12a9 9 0 1 1-2.6-6.3"/><path d="M21 3v6h-6"/>`,
+        view: html`<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>`,
     };
     return html`<button class=${'act act-' + kind + (wide ? ' act-wide' : '')} type="button" title=${label} aria-label=${label} onClick=${onClick}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${mark[kind]}</svg>${wide ? html`<span>${label}</span>` : null}</button>`;
 }
@@ -909,6 +909,115 @@ function FeedbackBox({ kind, onClose, onSave }) {
         <footer><button class="ghost" type="button" onClick=${onClose}>Cancel</button><button class="primary" type="submit">Save</button></footer>
     </form></div>`;
 }
+function shownText(value) {
+    if (value == null) return '—';
+    const text = String(value).trim();
+    return text === '' ? '—' : text;
+}
+function projectMoney(row) {
+    const items = Array.isArray(row.project_details) ? row.project_details : [];
+    if (items.length === 0) return '—';
+    return items.map((item) => (item.projectName || 'Project') + (item.amount != null && item.amount !== '' ? ' · ' + money(item.amount) : '')).join(', ');
+}
+function recordFacts(kind, row) {
+    const when = (value) => (value ? prettyWhen(value) : '—');
+    const day = (value) => (value ? prettyDate(value) : '—');
+    if (kind === 'calls') {
+        return [
+            ['Lead', shownText(row.lead_name)],
+            ['Phone', shownText(row.lead_phone)],
+            ['Project', shownText(row.project_name)],
+            ['Lead stage', shownText(row.lead_stage)],
+            ['Lead source', shownText(row.lead_source)],
+            ['Campaign', shownText(row.campaign_source)],
+            ['Subject', shownText(row.call_subject || row.body)],
+            ['Purpose', shownText(row.call_purpose)],
+            ['Description', shownText(row.call_description || row.body)],
+            ['Scheduled', when(row.call_scheduled_at || row.next_at)],
+            ['Status', html`<${StatusPill} value=${row.display_status} />`],
+            ['Assigned to', shownText(row.assigned_name)],
+            ['Assigned by', shownText(row.assigned_by_name)],
+            ['Feedback', shownText(row.call_feedback)],
+            ['Experience', shownText(row.experience)],
+            ['Notes', shownText(row.call_notes)],
+            ['Outcome', shownText(row.outcome)],
+            ['Created', when(row.created_at)],
+            ['Completed', when(row.completed_date || row.done_at)],
+        ];
+    }
+    if (kind === 'visits') {
+        return [
+            ['Lead', shownText(row.lead_name)],
+            ['Phone', shownText(row.lead_phone)],
+            ['Project', shownText(row.project_name)],
+            ['Plot', shownText(row.plot_no)],
+            ['Visit type', shownText(row.visit_type)],
+            ['Description', shownText(row.description || row.note)],
+            ['Scheduled', when(row.scheduled_date_time || row.scheduled_at)],
+            ['Status', html`<${StatusPill} value=${row.display_status} />`],
+            ['Assigned to', shownText(row.assigned_name || row.staff_name)],
+            ['Assigned by', shownText(row.assigned_by_name)],
+            ['Lead stage', shownText(row.lead_stage)],
+            ['Lead source', shownText(row.lead_source)],
+            ['Campaign', shownText(row.campaign_source)],
+            ['Feedback', shownText(row.visit_feedback)],
+            ['Experience', shownText(row.experience)],
+            ['Note', shownText(row.visit_note)],
+            ['Created', when(row.created_at)],
+            ['Completed', when(row.completed_date || row.attended_at)],
+        ];
+    }
+    if (kind === 'tasks') {
+        return [
+            ['Lead', shownText(row.lead_name)],
+            ['Phone', shownText(row.lead_phone)],
+            ['Project', shownText(row.project_name)],
+            ['Lead stage', shownText(row.lead_stage)],
+            ['Lead source', shownText(row.lead_source)],
+            ['Campaign', shownText(row.campaign_source)],
+            ['Subject', shownText(row.subject)],
+            ['Description', shownText(row.description)],
+            ['Priority', shownText(row.priority)],
+            ['Scheduled', when(row.scheduled_at)],
+            ['Status', html`<${StatusPill} value=${row.display_status} />`],
+            ['Assigned to', shownText(row.assigned_name)],
+            ['Assigned by', shownText(row.assigned_by_name)],
+            ['Feedback', shownText(row.task_feedback)],
+            ['Created', when(row.created_at)],
+            ['Completed', when(row.completed_date)],
+        ];
+    }
+    return [
+        ['Lead', shownText(row.lead_name)],
+        ['Project', shownText(row.project_name)],
+        ['Plot', shownText(row.plot_label || row.plot_no)],
+        ['Stage', shownText(dealLabel(row.deal_stage))],
+        ['Requested stage', shownText(row.requested_stage ? dealLabel(row.requested_stage) : '')],
+        ['Value', money(row.total_deal_value)],
+        ['Project amounts', projectMoney(row)],
+        ['Approval', row.approval_status === 'approved' ? 'Approved' : 'Waiting for the team manager'],
+        ['Approved at', when(row.approved_at)],
+        ['Description', shownText(row.deal_description)],
+        ['Stage note', shownText(row.deal_stage_description)],
+        ['Booking date', day(row.booking_date)],
+        ['Expected registration', day(row.expected_registration_date)],
+        ['Registration date', day(row.registration_date)],
+        ['Created', when(row.created_at)],
+        ['Updated', when(row.updated_at)],
+    ];
+}
+function recordTitle(kind, row) {
+    const label = kind === 'calls' ? 'Follow-up' : kind === 'visits' ? 'Visit' : kind === 'tasks' ? 'Task' : 'Deal';
+    return label + ' · ' + (row.lead_name || row.subject || 'Record');
+}
+function RecordSheet({ title, facts, onClose }) {
+    return html`<div class="modal-back" onClick=${onClose}>
+        <div class="filter-box record-sheet" onClick=${(event) => event.stopPropagation()}>
+            <header><h2>${title}</h2><button class="filter-x" type="button" aria-label="Close" onClick=${onClose}>×</button></header>
+            <div class="filter-body">${facts.map(([label, value]) => html`<div class="fact" key=${label}><span>${label}</span><div>${value}</div></div>`)}</div>
+        </div>
+    </div>`;
+}
 function Board({ kind, title, rows, onReload, onRow, onOpen, onEdit, onDelete, active, user }) {
     const [text, setText] = useState('');
     const [filters, setFilters] = useState(blankFilter);
@@ -919,6 +1028,7 @@ function Board({ kind, title, rows, onReload, onRow, onOpen, onEdit, onDelete, a
     const [move, setMove] = useState(null);
     const [when, setWhen] = useState('');
     const [feedbackRow, setFeedbackRow] = useState(null);
+    const [view, setView] = useState(null);
     const activity = kind !== 'leads';
     const counts = { SCHEDULED: 0, COMPLETED: 0, OVERDUE: 0, CANCELLED: 0 };
     rows.forEach((row) => { const key = String(row.display_status || '').toUpperCase(); if (counts[key] != null) counts[key] += 1; });
@@ -983,10 +1093,10 @@ function Board({ kind, title, rows, onReload, onRow, onOpen, onEdit, onDelete, a
     const canMove = kind === 'visits' ? allows(user, 'visits.create') : kind === 'tasks' ? allows(user, 'tasks.update') : allows(user, 'followups.create');
     function actions(row) {
         const closed = ['COMPLETED', 'CANCELLED'].includes(String(row.display_status || '').toUpperCase());
-        if (closed || (!canDone && !canMove)) return null;
         return html`<div class="row-actions" onClick=${(event) => event.stopPropagation()}>
-            ${canDone ? html`<button class="act-done" disabled=${busy === row.id} onClick=${(event) => done(row, event)}>Mark Done</button>` : null}
-            ${canMove ? html`<button class="act-later" onClick=${() => { setMove(row); setWhen(''); }}>Reschedule</button>` : null}
+            ${actIcon('view', 'View', () => setView(row), true)}
+            ${!closed && canDone ? html`<button class="act-done" disabled=${busy === row.id} onClick=${(event) => done(row, event)}>Mark Done</button>` : null}
+            ${!closed && canMove ? html`<button class="act-later" onClick=${() => { setMove(row); setWhen(''); }}>Reschedule</button>` : null}
         </div>`;
     }
     return html`<article class="board">
@@ -1039,12 +1149,13 @@ function Board({ kind, title, rows, onReload, onRow, onOpen, onEdit, onDelete, a
             </form>
         </div>` : null}
         ${feedbackRow ? html`<${FeedbackBox} kind=${kind === 'visits' ? 'visits' : kind === 'tasks' ? 'tasks' : 'calls'} onClose=${() => setFeedbackRow(null)} onSave=${saveFeedback} />` : null}
+        ${view ? html`<${RecordSheet} title=${recordTitle(kind, view)} facts=${recordFacts(kind, view)} onClose=${() => setView(null)} />` : null}
         <div class="table-card"><table class="board-table">
             <thead><tr>
                 ${kind === 'leads' ? html`<th>Lead name</th><th>Phone no</th><th>Project</th><th>Assigned to</th><th>Lead stage</th><th>Lead source</th><th>Modified date</th><th>Created on</th>${onEdit || onDelete ? html`<th></th>` : null}` : null}
-                ${kind === 'calls' ? html`<th>Lead name</th><th>Phone number</th><th>Schedule date</th><th>Subject</th><th>Assigned to</th><th>Assigned by</th><th>Created on</th><th>Status</th>${canDone || canMove ? html`<th></th>` : null}` : null}
-                ${kind === 'visits' ? html`<th>Lead name</th><th>Project</th><th>Schedule date</th><th>Assigned to</th><th>Assigned by</th><th>Created on</th><th>Status</th>${canDone || canMove ? html`<th></th>` : null}` : null}
-                ${kind === 'tasks' ? html`<th>Lead name</th><th>Subject</th><th>Priority</th><th>Start time</th><th>Assigned to</th><th>Created on</th><th>Status</th>${canDone || canMove ? html`<th></th>` : null}` : null}
+                ${kind === 'calls' ? html`<th>Lead name</th><th>Phone number</th><th>Schedule date</th><th>Subject</th><th>Assigned to</th><th>Assigned by</th><th>Created on</th><th>Status</th><th class="view-col">View</th>` : null}
+                ${kind === 'visits' ? html`<th>Lead name</th><th>Project</th><th>Schedule date</th><th>Assigned to</th><th>Assigned by</th><th>Created on</th><th>Status</th><th class="view-col">View</th>` : null}
+                ${kind === 'tasks' ? html`<th>Lead name</th><th>Subject</th><th>Priority</th><th>Start time</th><th>Assigned to</th><th>Created on</th><th>Status</th><th class="view-col">View</th>` : null}
             </tr></thead>
             <tbody>
                 ${shown.length === 0 ? html`<tr><td colSpan="9">Nothing here yet.</td></tr>` : shown.map((row) => html`<tr key=${row.id} class=${active === row ? 'active' : ''} onClick=${() => { onRow && onRow(row); if (onOpen) onOpen(row); }}>
@@ -1070,7 +1181,7 @@ function Board({ kind, title, rows, onReload, onRow, onOpen, onEdit, onDelete, a
                         <td><${Person} name=${row.assigned_by_name} /></td>
                         <td>${prettyWhen(row.created_at)}</td>
                         <td><${StatusPill} value=${row.display_status} /></td>
-                        ${canDone || canMove ? html`<td>${actions(row)}</td>` : null}` : null}
+                        <td class="view-col">${actions(row)}</td>` : null}
                     ${kind === 'visits' ? html`
                         <td>${row.lead_name || '—'}</td>
                         <td>${row.project_name || '—'}</td>
@@ -1079,7 +1190,7 @@ function Board({ kind, title, rows, onReload, onRow, onOpen, onEdit, onDelete, a
                         <td><${Person} name=${row.assigned_by_name} /></td>
                         <td>${prettyWhen(row.created_at)}</td>
                         <td><${StatusPill} value=${row.display_status} /></td>
-                        ${canDone || canMove ? html`<td>${actions(row)}</td>` : null}` : null}
+                        <td class="view-col">${actions(row)}</td>` : null}
                     ${kind === 'tasks' ? html`
                         <td>${row.lead_name || '—'}</td>
                         <td>${row.subject || '—'}</td>
@@ -1088,7 +1199,7 @@ function Board({ kind, title, rows, onReload, onRow, onOpen, onEdit, onDelete, a
                         <td><${Person} name=${row.assigned_name} /></td>
                         <td>${prettyWhen(row.created_at)}</td>
                         <td><${StatusPill} value=${row.display_status} /></td>
-                        ${canDone || canMove ? html`<td>${actions(row)}</td>` : null}` : null}
+                        <td class="view-col">${actions(row)}</td>` : null}
                 </tr>`)}
             </tbody>
         </table></div>
@@ -1122,6 +1233,7 @@ function LeadPage({ leadId, onBack, user }) {
     const [plots, setPlots] = useState([]);
     const [stages, setStages] = useState([]);
     const [feedbackRow, setFeedbackRow] = useState(null);
+    const [view, setView] = useState(null);
     const [history, setHistory] = useState([]);
     const loadTick = useRef(0);
     const safe = (path) => call(path).catch(() => []);
@@ -1316,7 +1428,7 @@ function LeadPage({ leadId, onBack, user }) {
                 </section>
                 <section class="lead-card">
                     <div class="card-head"><h3>Deals</h3>${canEdit ? html`<button type="button" class="add-round" onClick=${() => setEditor('deal')}><i>+</i> Add Deal</button>` : null}</div>
-                    ${deals.length === 0 ? html`<div class="empty-deal"><svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#c5c9d1" stroke-width="1.4"><path d="M8 4h8l2 3v13H6V7l2-3z"/><path d="M9 12h6M9 16h6"/></svg></div>` : html`<div class="deal-list">${deals.map((row) => html`<article key=${row.id}><strong>${dealLabel(row.requested_stage || row.deal_stage)}</strong><span>${money(row.total_deal_value)}</span><p>${row.plot_label || row.plot_no || 'No plot'} · ${row.approval_status === 'approved' ? 'Approved' : 'Waiting for the team manager'}${row.requested_stage ? ' · ' + dealLabel(row.requested_stage) + ' after approval' : ''}</p>${canApproveDeal && row.approval_status !== 'approved' ? html`<button type="button" class="ghost" onClick=${() => approveDeal(row.id)}>Approve</button>` : null}</article>`)}</div>`}
+                    ${deals.length === 0 ? html`<div class="empty-deal"><svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#c5c9d1" stroke-width="1.4"><path d="M8 4h8l2 3v13H6V7l2-3z"/><path d="M9 12h6M9 16h6"/></svg></div>` : html`<div class="deal-list">${deals.map((row) => html`<article key=${row.id}><strong>${dealLabel(row.requested_stage || row.deal_stage)}</strong><span class="deal-tools">${money(row.total_deal_value)}${actIcon('view', 'View', () => setView({ kind: 'deals', row }), true)}</span><p>${row.plot_label || row.plot_no || 'No plot'} · ${row.approval_status === 'approved' ? 'Approved' : 'Waiting for the team manager'}${row.requested_stage ? ' · ' + dealLabel(row.requested_stage) + ' after approval' : ''}</p>${canApproveDeal && row.approval_status !== 'approved' ? html`<button type="button" class="ghost" onClick=${() => approveDeal(row.id)}>Approve</button>` : null}</article>`)}</div>`}
                 </section>
             </div>` : null}
             ${section === 'notes' ? html`<section class="lead-card">
@@ -1351,7 +1463,7 @@ function LeadPage({ leadId, onBack, user }) {
                         <td>${prettyWhen(row.call_scheduled_at || row.scheduled_date_time || row.scheduled_at || row.next_at)}</td>
                         <td>${row.call_subject || row.subject || row.visit_type || row.description || '—'}</td>
                         <td><${StatusPill} value=${row.display_status} /></td>
-                        <td>${!canFinish || ['COMPLETED', 'CANCELLED'].includes(String(row.display_status || '').toUpperCase()) ? null : html`<button class="act-done" type="button" onClick=${() => finish(tab, row)}>Mark Done</button>`}</td>
+                        <td class="row-actions">${actIcon('view', 'View', () => setView({ kind: activeTab === 'visits' ? 'visits' : activeTab === 'tasks' ? 'tasks' : 'calls', row }), true)}${!canFinish || ['COMPLETED', 'CANCELLED'].includes(String(row.display_status || '').toUpperCase()) ? null : html`<button class="act-done" type="button" onClick=${() => finish(activeTab, row)}>Mark Done</button>`}</td>
                     </tr>`)}
                 </tbody></table>`}
             </section>` : null}
@@ -1382,6 +1494,7 @@ function LeadPage({ leadId, onBack, user }) {
         ${editor === 'task' ? html`<${TaskForm} leadId=${leadId} leadName=${lead.name} onDone=${() => savedActivity('tasks')} onClose=${() => setEditor('')} />` : null}
         ${editor === 'whatsapp' ? html`<${SendWhatsApp} lead=${lead} onDone=${() => setEditor('')} onClose=${() => setEditor('')} />` : null}
         ${feedbackRow ? html`<${FeedbackBox} kind=${feedbackRow.kind === 'visits' ? 'visits' : feedbackRow.kind === 'tasks' ? 'tasks' : 'calls'} onClose=${() => setFeedbackRow(null)} onSave=${saveFeedback} />` : null}
+        ${view ? html`<${RecordSheet} title=${recordTitle(view.kind, view.row)} facts=${recordFacts(view.kind, view.row)} onClose=${() => setView(null)} />` : null}
     </div>`;
 }
 const PLOT_LABEL = { available: 'Available', advance: 'Advance', booked: 'Booked', sold: 'Sold', owner_use: 'Owner use', future: 'Future', registered: 'Registered', hold: 'Hold', blocked: 'Blocked' };
@@ -3078,28 +3191,6 @@ function CompanyBoard({ onSaved, user }) {
             ${field('Task reminder template', html`<input value=${form.whatsapp?.task || ''} placeholder="Exact AskEva template name" onInput=${(event) => setForm({ ...form, whatsapp: { ...(form.whatsapp || {}), task: event.target.value } })} />`)}
             ${field('Deal approval template', html`<input value=${form.whatsapp?.dealApprove || ''} placeholder="Exact AskEva template name, sent when a manager approves a deal" onInput=${(event) => setForm({ ...form, whatsapp: { ...(form.whatsapp || {}), dealApprove: event.target.value } })} />`, true)}
         </div>
-        <h3>Firebase</h3>
-        <p class="fine">${form.firebase?.connected ? (form.firebase.source === 'company' ? 'Saved for this company. ' : 'Using the server file. ') + 'Project ' + (form.firebase.project || '') + '. ' + (form.firebase.email || '') : 'Phone push is not connected. Upload the Firebase service account JSON.'}</p>
-        ${canSave ? html`<label class="field">Service account JSON<input type="file" accept="application/json,.json" onChange=${async (event) => {
-            const file = event.target.files && event.target.files[0];
-            event.target.value = '';
-            if (!file) return;
-            setError('');
-            setSaved('');
-            try {
-                const headers = { Accept: 'application/json' };
-                const savedToken = localStorage.getItem(tokenKey);
-                if (savedToken) headers.Authorization = 'Bearer ' + savedToken;
-                const body = new FormData();
-                body.append('account', file);
-                const response = await fetch(apiPath('/api/v1/company/firebase'), { method: 'POST', headers, body });
-                const payload = await response.json();
-                if (!response.ok || payload.ok === false) throw new Error(payload.error || 'Firebase was not saved.');
-                setForm(payload.data);
-                setSaved('Firebase saved.');
-                if (onSaved) await onSaved();
-            } catch (e) { setError(e.message); }
-        }} /></label>` : null}
         ${canSave ? html`<div class="row-actions"><button class="ghost" type="button" onClick=${async () => {
             setError('');
             try {
@@ -3840,6 +3931,7 @@ function MasterBoard({ title, spec, user }) {
 function DealsBoard({ user }) {
     const [rows, setRows] = useState([]);
     const [error, setError] = useState('');
+    const [view, setView] = useState(null);
     const canApprove = allows(user, 'deals.approve');
     function load() { call('/api/v1/deals').then((list) => setRows(Array.isArray(list) ? list : [])).catch((e) => setError(e.message)); }
     useEffect(() => { load(); }, []);
@@ -3852,16 +3944,18 @@ function DealsBoard({ user }) {
         <p class="lede">Every deal in this workspace. Creation stays pending until the team manager approves it. Booking and registration move forward only after that approval.</p>
         ${error ? html`<p class="error">${error}</p>` : null}
         <div class="table-card"><table class="board-table">
-            <thead><tr><th>Lead</th><th>Plot</th><th>Stage</th><th>Value</th><th>Approval</th>${canApprove ? html`<th></th>` : null}</tr></thead>
-            <tbody>${rows.length === 0 ? html`<tr><td colspan="6">No deals yet</td></tr>` : rows.map((row) => html`<tr key=${row.id}>
+            <thead><tr><th>Lead</th><th>Plot</th><th>Stage</th><th>Value</th><th>Approval</th><th class="view-col">View</th>${canApprove ? html`<th></th>` : null}</tr></thead>
+            <tbody>${rows.length === 0 ? html`<tr><td colspan="7">No deals yet</td></tr>` : rows.map((row) => html`<tr key=${row.id}>
                 <td>${row.lead_name || '—'}</td>
                 <td>${row.plot_label || row.plot_no || '—'}</td>
                 <td>${dealLabel(row.requested_stage || row.deal_stage)}</td>
                 <td>${money(row.total_deal_value)}</td>
                 <td>${row.approval_status === 'approved' ? 'Approved' : 'Waiting for the team manager'}</td>
+                <td class="view-col">${actIcon('view', 'View', () => setView(row), true)}</td>
                 ${canApprove && row.approval_status !== 'approved' ? html`<td><button type="button" class="ghost" onClick=${() => approve(row)}>Approve</button></td>` : canApprove ? html`<td></td>` : null}
             </tr>`)}</tbody>
         </table></div>
+        ${view ? html`<${RecordSheet} title=${recordTitle('deals', view)} facts=${recordFacts('deals', view)} onClose=${() => setView(null)} />` : null}
     </section>`;
 }
 function App() {

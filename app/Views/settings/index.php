@@ -37,17 +37,6 @@
     <label>Task assign template <input name="whatsapp_task_assign" value="<?= esc($whatsapp['taskAssign'] ?? '') ?>" placeholder="Exact AskEva template name, sent to the assignee"></label>
     <label>Task reminder template <input name="whatsapp_task_reminder" value="<?= esc($whatsapp['task'] ?? '') ?>" placeholder="Exact AskEva template name"></label>
     <label>Deal approval template <input name="whatsapp_deal_approve" value="<?= esc($whatsapp['dealApprove'] ?? '') ?>" placeholder="Exact AskEva template name, sent when a manager approves a deal"></label>
-    <h2>Firebase</h2>
-    <p class="lede">
-        <?php if (($firebase['source'] ?? '') === 'company') : ?>
-            Saved for this company. Project <?= esc($firebase['project']) ?>. <?= esc($firebase['email']) ?>
-        <?php elseif (($firebase['source'] ?? '') === 'server') : ?>
-            Using the server file. Project <?= esc($firebase['project']) ?>. <?= esc($firebase['email']) ?>
-        <?php else : ?>
-            Phone push is not connected. Upload the Firebase service account JSON.
-        <?php endif; ?>
-    </p>
-    <label>Service account JSON <input type="file" name="account" accept="application/json,.json"></label>
     <button class="primary" type="submit"><?= icon('settings') ?> Save</button>
 </form>
 <?= $this->endSection() ?>
